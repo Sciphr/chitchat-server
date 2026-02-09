@@ -18,6 +18,9 @@ export interface Message {
   room_id: string;
   user_id: string;
   username: string;
+  avatar_url?: string;
+  client_nonce?: string;
+  pending?: boolean;
   content: string;
   created_at: string;
 }

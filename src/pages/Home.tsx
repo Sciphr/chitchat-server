@@ -3,40 +3,21 @@ import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/layout/Sidebar";
 import ChatRoom from "../components/chat/ChatRoom";
 import VoiceChannel from "../components/voice/VoiceChannel";
+import Settings from "./Settings";
 import { useSocket } from "../hooks/useSocket";
 import { useAuth } from "../hooks/useAuth";
 import type { Room } from "../types";
 
-const DEFAULT_ROOMS: Room[] = [
-  {
-    id: "general",
-    name: "general",
-    type: "text",
-    created_by: "system",
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: "random",
-    name: "random",
-    type: "text",
-    created_by: "system",
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: "voice-lobby",
-    name: "Lobby",
-    type: "voice",
-    created_by: "system",
-    created_at: new Date().toISOString(),
-  },
-];
-
 export default function Home() {
   const navigate = useNavigate();
-  const { session, user, username, loading, signOut } = useAuth();
-  const { socket, isConnected } = useSocket(session?.access_token);
-  const [rooms, setRooms] = useState<Room[]>(DEFAULT_ROOMS);
-  const [activeRoom, setActiveRoom] = useState<Room | null>(DEFAULT_ROOMS[0]);
+  const { session, user, username, profile, loading, signOut } = useAuth();
+  const { socket, isConnected } = useSocket();
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [activeRoom, setActiveRoom] = useState<Room | null>(null);
+  const [voiceParticipants, setVoiceParticipants] = useState<
+    Record<string, Array<{ id: string; name: string; isSpeaking: boolean }>>
+  >({});
+  const [showSettings, setShowSettings] = useState(false);
 
   // Redirect to login if not authenticated
   useEffect(() => {
@@ -50,10 +31,11 @@ export default function Home() {
     if (isConnected && user) {
       socket.emit("user:identify", {
         userId: user.id,
-        username,
+        username: profile.username,
+        avatarUrl: profile.avatarUrl || undefined,
       });
     }
-  }, [isConnected, user, username, socket]);
+  }, [isConnected, user, profile.username, profile.avatarUrl, socket]);
 
   // Listen for room list updates from server
   useEffect(() => {
@@ -62,6 +44,12 @@ export default function Home() {
     function onRooms(serverRooms: Room[]) {
       if (serverRooms.length > 0) {
         setRooms(serverRooms);
+        setActiveRoom((prev) => {
+          if (prev && serverRooms.some((room) => room.id === prev.id)) {
+            return prev;
+          }
+          return serverRooms[0];
+        });
       }
     }
 
@@ -75,6 +63,13 @@ export default function Home() {
 
   function handleCreateRoom(name: string, type: "text" | "voice") {
     socket.emit("room:create", { name, type });
+  }
+
+  function handleParticipantsChange(
+    roomId: string,
+    participants: Array<{ id: string; name: string; isSpeaking: boolean }>,
+  ) {
+    setVoiceParticipants((prev) => ({ ...prev, [roomId]: participants }));
   }
 
   async function handleSignOut() {
@@ -91,30 +86,50 @@ export default function Home() {
   }
 
   return (
-    <div className="flex h-screen">
+    <div className="relative flex h-screen bg-[var(--bg-primary)]">
+      <div className="absolute inset-0 app-bg" />
+
+      <div className="relative z-10 flex w-full h-full p-4 gap-5">
       <Sidebar
         rooms={rooms}
         activeRoom={activeRoom}
         onSelectRoom={setActiveRoom}
         onCreateRoom={handleCreateRoom}
-        username={username}
+        username={profile.username}
+        status={profile.status}
+        avatarUrl={profile.avatarUrl}
+        voiceParticipants={voiceParticipants}
+        onOpenSettings={() => setShowSettings(true)}
         onSignOut={handleSignOut}
       />
 
-      {/* Main content area */}
-      <main className="flex-1 flex flex-col bg-[var(--bg-primary)]">
-        {activeRoom ? (
+        {/* Main content area */}
+        <main className="flex-1 flex flex-col pl-1 pr-2">
+          <div className="flex-1 flex flex-col rounded-2xl panel overflow-hidden">
+            {activeRoom ? (
           activeRoom.type === "text" ? (
-            <ChatRoom room={activeRoom} />
+            <ChatRoom
+              room={activeRoom}
+              socket={socket}
+              isConnected={isConnected}
+              currentUserId={user?.id ?? null}
+              currentUsername={profile.username}
+              currentAvatarUrl={profile.avatarUrl}
+            />
           ) : (
-            <VoiceChannel room={activeRoom} />
+            <VoiceChannel
+              room={activeRoom}
+              onParticipantsChange={handleParticipantsChange}
+            />
           )
-        ) : (
-          <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
-            Select a channel to get started
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
+                Select a channel to get started
+              </div>
+            )}
           </div>
-        )}
-      </main>
+        </main>
+      </div>
 
       {/* Connection status indicator */}
       <div
@@ -126,6 +141,10 @@ export default function Home() {
       >
         {isConnected ? "Connected" : "Disconnected"}
       </div>
+
+      {showSettings && (
+        <Settings onClose={() => setShowSettings(false)} />
+      )}
     </div>
   );
 }

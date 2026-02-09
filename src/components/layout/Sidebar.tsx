@@ -7,6 +7,13 @@ interface SidebarProps {
   onSelectRoom: (room: Room) => void;
   onCreateRoom: (name: string, type: "text" | "voice") => void;
   username: string;
+  status: "online" | "offline" | "away" | "dnd";
+  avatarUrl: string;
+  voiceParticipants: Record<
+    string,
+    Array<{ id: string; name: string; isSpeaking: boolean }>
+  >;
+  onOpenSettings: () => void;
   onSignOut: () => void;
 }
 
@@ -16,79 +23,150 @@ export default function Sidebar({
   onSelectRoom,
   onCreateRoom,
   username,
+  status,
+  avatarUrl,
+  voiceParticipants,
+  onOpenSettings,
   onSignOut,
 }: SidebarProps) {
   const [newRoomName, setNewRoomName] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [createType, setCreateType] = useState<"text" | "voice">("text");
 
   const textRooms = rooms.filter((r) => r.type === "text");
   const voiceRooms = rooms.filter((r) => r.type === "voice");
 
-  function handleCreate(type: "text" | "voice") {
+  const statusMap: Record<string, { label: string; color: string }> = {
+    online: { label: "Online", color: "var(--success)" },
+    away: { label: "Away", color: "#f59e0b" },
+    dnd: { label: "Do not disturb", color: "var(--danger)" },
+    offline: { label: "Offline", color: "var(--text-muted)" },
+  };
+
+  const currentStatus = statusMap[status] || statusMap.online;
+
+  function openCreateModal() {
+    setCreateType("text");
+    setShowCreate(true);
+  }
+
+  function closeCreateModal() {
+    setShowCreate(false);
+    setNewRoomName("");
+  }
+
+  function handleCreate() {
     if (newRoomName.trim()) {
-      onCreateRoom(newRoomName.trim(), type);
-      setNewRoomName("");
-      setShowCreate(false);
+      onCreateRoom(newRoomName.trim(), createType);
+      closeCreateModal();
     }
   }
 
   return (
-    <aside className="flex flex-col w-60 h-full bg-[var(--bg-secondary)] border-r border-[var(--border)]">
-      {/* Server header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
-        <h1 className="text-lg font-bold text-[var(--accent)]">ChitChat</h1>
-        <button
-          onClick={() => setShowCreate(!showCreate)}
-          className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-xl leading-none cursor-pointer"
-          title="Create room"
-        >
-          +
-        </button>
-      </div>
+    <>
+      <aside className="flex flex-col w-72 h-full sidebar-panel">
+        {/* Server header */}
+        <div className="px-5 pt-5 pb-4 border-b border-[var(--border)] bg-[var(--bg-primary)]/40">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-[var(--bg-tertiary)] border border-[var(--border)] flex items-center justify-center shadow-[0_10px_30px_-20px_rgba(124,106,255,0.6)]">
+                <span className="text-[var(--accent)] font-bold heading-font">
+                  CC
+                </span>
+              </div>
+              <div>
+                <h1 className="text-lg font-bold text-[var(--text-primary)] heading-font tracking-tight">
+                  ChitChat
+                </h1>
+                <div className="flex items-center gap-2">
+                  <span className="inline-block w-2 h-2 rounded-full bg-[var(--success)] shadow-[0_0_10px_rgba(52,211,153,0.6)]" />
+                  <p className="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.12em]">
+                    Self-hosted
+                  </p>
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={openCreateModal}
+              className="w-9 h-9 rounded-xl bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] text-xl leading-none cursor-pointer transition-colors"
+              title="Create channel"
+            >
+              +
+            </button>
+          </div>
+        </div>
 
-      {/* Create room form */}
+      {/* Create channel modal */}
       {showCreate && (
-        <div className="p-3 border-b border-[var(--border)]">
-          <input
-            type="text"
-            value={newRoomName}
-            onChange={(e) => setNewRoomName(e.target.value)}
-            placeholder="Room name..."
-            className="w-full px-2 py-1 mb-2 text-sm bg-[var(--bg-input)] text-[var(--text-primary)] border border-[var(--border)] rounded outline-none focus:border-[var(--accent)]"
-          />
-          <div className="flex gap-2">
-            <button
-              onClick={() => handleCreate("text")}
-              className="flex-1 px-2 py-1 text-xs bg-[var(--accent)] text-white rounded hover:bg-[var(--accent-hover)] cursor-pointer"
-            >
-              Text
-            </button>
-            <button
-              onClick={() => handleCreate("voice")}
-              className="flex-1 px-2 py-1 text-xs bg-[var(--bg-tertiary)] text-white rounded hover:bg-[var(--accent)] cursor-pointer"
-            >
-              Voice
-            </button>
+        <div
+          className="create-modal-backdrop"
+          onClick={closeCreateModal}
+        >
+          <div
+            className="create-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="create-modal-title">Create Channel</div>
+            <p className="create-modal-subtitle">
+              Give your new channel a name and choose its type.
+            </p>
+            <div className="create-toggle" role="group" aria-label="Channel type">
+              <button
+                type="button"
+                className={`create-toggle-option ${
+                  createType === "text" ? "active" : ""
+                }`}
+                onClick={() => setCreateType("text")}
+              >
+                Text
+              </button>
+              <button
+                type="button"
+                className={`create-toggle-option ${
+                  createType === "voice" ? "active" : ""
+                }`}
+                onClick={() => setCreateType("voice")}
+              >
+                Voice
+              </button>
+            </div>
+            <input
+              type="text"
+              value={newRoomName}
+              onChange={(e) => setNewRoomName(e.target.value)}
+              placeholder="channel-name"
+              className="w-full px-3 py-3 mb-4 text-sm bg-[var(--bg-input)] text-[var(--text-primary)] border border-[var(--border)] rounded-lg outline-none focus:border-[var(--accent)]"
+            />
+            <div className="create-modal-actions">
+              <button
+                type="button"
+                onClick={closeCreateModal}
+                className="profile-button secondary"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCreate}
+                className="profile-button"
+              >
+                Create channel
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {/* Room lists */}
-      <div className="flex-1 overflow-y-auto py-2">
+      <div className="flex-1 overflow-y-auto py-4">
         {/* Text channels */}
-        <div className="px-3 py-1">
-          <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-            Text Channels
-          </span>
-        </div>
+        <div className="sidebar-section-title heading-font">Text Channels</div>
         {textRooms.map((room) => (
           <button
             key={room.id}
             onClick={() => onSelectRoom(room)}
-            className={`w-full text-left px-4 py-1.5 text-sm cursor-pointer transition-colors ${
-              activeRoom?.id === room.id
-                ? "bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
-                : "text-[var(--text-secondary)] hover:bg-[var(--bg-primary)] hover:text-[var(--text-primary)]"
+            className={`sidebar-channel ${
+              activeRoom?.id === room.id ? "active" : ""
             }`}
           >
             # {room.name}
@@ -96,43 +174,87 @@ export default function Sidebar({
         ))}
 
         {/* Voice channels */}
-        <div className="px-3 py-1 mt-3">
-          <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-            Voice Channels
-          </span>
-        </div>
+        <div className="sidebar-section-title heading-font">Voice Channels</div>
         {voiceRooms.map((room) => (
-          <button
-            key={room.id}
-            onClick={() => onSelectRoom(room)}
-            className={`w-full text-left px-4 py-1.5 text-sm cursor-pointer transition-colors ${
-              activeRoom?.id === room.id
-                ? "bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
-                : "text-[var(--text-secondary)] hover:bg-[var(--bg-primary)] hover:text-[var(--text-primary)]"
-            }`}
-          >
-            🔊 {room.name}
-          </button>
+          <div key={room.id}>
+            <button
+              onClick={() => onSelectRoom(room)}
+              className={`sidebar-channel ${
+                activeRoom?.id === room.id ? "active" : ""
+              }`}
+            >
+              [V] {room.name}
+            </button>
+            {voiceParticipants[room.id]?.length ? (
+              <div className="sidebar-voice-participants">
+                {voiceParticipants[room.id].map((participant) => (
+                  <div
+                    key={`${room.id}-${participant.id}`}
+                    className={`sidebar-voice-participant ${
+                      participant.isSpeaking ? "speaking" : ""
+                    }`}
+                  >
+                    <span className="sidebar-voice-dot" />
+                    <span className="sidebar-voice-name">
+                      {participant.name}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
         ))}
       </div>
 
       {/* User panel at bottom */}
-      <div className="flex items-center gap-2 px-3 py-2 border-t border-[var(--border)] bg-[var(--bg-primary)]">
-        <div className="w-8 h-8 rounded-full bg-[var(--accent)] flex items-center justify-center text-white text-sm font-bold">
-          {username.charAt(0).toUpperCase()}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium truncate">{username}</div>
-          <div className="text-xs text-[var(--success)]">Online</div>
+      <div className="mx-3 mb-3 mt-1">
+        <div
+          className="sidebar-user flex items-center gap-3 cursor-pointer"
+          role="button"
+          tabIndex={0}
+          onClick={onOpenSettings}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onOpenSettings();
+            }
+          }}
+          title="Edit profile"
+        >
+          <div className="w-9 h-9 rounded-xl bg-[var(--accent)] flex items-center justify-center text-white text-sm font-bold overflow-hidden">
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt={username}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              username.charAt(0).toUpperCase()
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium truncate">{username}</div>
+            <div className="flex items-center gap-2 text-xs">
+              <span
+                className="inline-block w-2 h-2 rounded-full"
+                style={{ background: currentStatus.color }}
+              />
+              <span className="text-[var(--text-muted)]">
+                {currentStatus.label}
+              </span>
+            </div>
+          </div>
+          <span className="text-xs text-[var(--text-muted)]">Profile</span>
         </div>
         <button
           onClick={onSignOut}
-          className="text-[var(--text-muted)] hover:text-[var(--danger)] text-xs cursor-pointer"
+          className="mt-2 w-full text-xs py-2 rounded-xl border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--danger)] hover:border-[var(--danger)]/40 transition-colors"
           title="Sign out"
         >
-          ✕
+          Sign out
         </button>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }

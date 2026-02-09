@@ -7,8 +7,15 @@ CREATE TABLE IF NOT EXISTS public.users (
   username TEXT UNIQUE NOT NULL,
   email TEXT UNIQUE NOT NULL,
   avatar_url TEXT,
+  about TEXT,
+  push_to_talk_enabled BOOLEAN DEFAULT false,
+  push_to_talk_key TEXT DEFAULT 'Space',
+  audio_input_id TEXT,
+  video_input_id TEXT,
+  audio_output_id TEXT,
   status TEXT DEFAULT 'offline' CHECK (status IN ('online', 'offline', 'away', 'dnd')),
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Rooms (text and voice channels)
@@ -31,9 +38,8 @@ CREATE TABLE IF NOT EXISTS public.room_members (
 -- Messages
 CREATE TABLE IF NOT EXISTS public.messages (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  room_id TEXT NOT NULL,
-  user_id TEXT NOT NULL,
-  username TEXT NOT NULL,
+  room_id UUID NOT NULL REFERENCES public.rooms(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
   content TEXT NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -68,8 +74,10 @@ ALTER TABLE public.room_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.friends ENABLE ROW LEVEL SECURITY;
 
--- Basic RLS policies (permissive for now — tighten for production)
+-- Basic RLS policies (permissive for now - tighten for production)
 CREATE POLICY "Users are viewable by everyone" ON public.users FOR SELECT USING (true);
+CREATE POLICY "Users can insert own profile" ON public.users FOR INSERT WITH CHECK (auth.uid() = id);
+CREATE POLICY "Users can update own profile" ON public.users FOR UPDATE USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
 CREATE POLICY "Rooms are viewable by everyone" ON public.rooms FOR SELECT USING (true);
 CREATE POLICY "Rooms are insertable by authenticated" ON public.rooms FOR INSERT WITH CHECK (true);
 CREATE POLICY "Messages are viewable by everyone" ON public.messages FOR SELECT USING (true);
@@ -78,3 +86,28 @@ CREATE POLICY "Room members viewable by everyone" ON public.room_members FOR SEL
 CREATE POLICY "Friends viewable by involved users" ON public.friends FOR SELECT USING (
   auth.uid() = user_id OR auth.uid() = friend_id
 );
+
+-- Auto-create public.users profile on signup
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.users (id, email, username, status)
+  VALUES (
+    NEW.id,
+    NEW.email,
+    COALESCE(NEW.raw_user_meta_data->>'username', split_part(NEW.email, '@', 1)),
+    'online'
+  )
+  ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+AFTER INSERT ON auth.users
+FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
