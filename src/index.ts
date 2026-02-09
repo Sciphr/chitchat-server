@@ -6,6 +6,7 @@ import { Server } from "socket.io";
 import { setupSocketHandlers } from "./websocket/handler.js";
 import authRoutes from "./routes/auth.js";
 import roomsRoutes from "./routes/rooms.js";
+import livekitRoutes from "./routes/livekit.js";
 
 const PORT = parseInt(process.env.PORT || "3001", 10);
 
@@ -27,6 +28,7 @@ app.use(express.json());
 // REST routes
 app.use("/api/auth", authRoutes);
 app.use("/api/rooms", roomsRoutes);
+app.use("/api/livekit", livekitRoutes);
 
 // Health check
 app.get("/api/health", (_req, res) => {
