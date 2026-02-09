@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(cmd /c \"dir c:\\\\Users\\\\J.Berry\\\\Documents\\\\Webwork\\\\chitchat 2>&1\")",
+      "Bash(cmd /c:*)",
+      "Bash(node --version:*)",
+      "Bash(cargo --version:*)",
+      "Bash(npm:*)",
+      "Bash(pnpm --version:*)",
+      "Bash(npx @tauri-apps/cli:*)",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}
