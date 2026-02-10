@@ -5,317 +5,236 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Session, User } from "@supabase/supabase-js";
-import { supabase } from "../lib/supabase";
+import {
+  apiFetch,
+  getToken,
+  setToken,
+  getServerUrl,
+  setServerUrl as _setServerUrl,
+} from "../lib/api";
+import { resetSocket } from "../lib/socket";
+
+interface UserInfo {
+  id: string;
+  email: string;
+  isAdmin: boolean;
+}
+
+interface Profile {
+  username: string;
+  status: "online" | "offline" | "away" | "dnd";
+  avatarUrl: string;
+  about: string;
+  pushToTalkEnabled: boolean;
+  pushToTalkKey: string;
+  audioInputId: string;
+  audioOutputId: string;
+  videoInputId: string;
+}
 
 interface AuthContext {
-  session: Session | null;
-  user: User | null;
+  token: string | null;
+  user: UserInfo | null;
   username: string;
-  profile: {
-    username: string;
-    status: "online" | "offline" | "away" | "dnd";
-    avatarUrl: string;
-    about: string;
-    pushToTalkEnabled: boolean;
-    pushToTalkKey: string;
-    audioInputId: string;
-    audioOutputId: string;
-    videoInputId: string;
-  };
+  profile: Profile;
   loading: boolean;
+  serverUrl: string;
+  setServerUrl: (url: string) => void;
   signInWithPassword: (
     email: string,
-    password: string,
+    password: string
   ) => Promise<{ error: string | null }>;
   signUp: (
     email: string,
     password: string,
     username: string,
+    inviteCode?: string
   ) => Promise<{ error: string | null }>;
-  signInWithGoogle: () => Promise<{ error: string | null }>;
-  updateProfile: (profile: {
-    username: string;
-    status: "online" | "offline" | "away" | "dnd";
-    avatarUrl: string;
-    about: string;
-    pushToTalkEnabled: boolean;
-    pushToTalkKey: string;
-    audioInputId: string;
-    audioOutputId: string;
-    videoInputId: string;
-  }) => Promise<{ error: string | null }>;
+  updateProfile: (profile: Profile) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
 
+const DEFAULT_PROFILE: Profile = {
+  username: "Anonymous",
+  status: "online",
+  avatarUrl: "",
+  about: "",
+  pushToTalkEnabled: false,
+  pushToTalkKey: "Space",
+  audioInputId: "",
+  audioOutputId: "",
+  videoInputId: "",
+};
+
 const AuthContext = createContext<AuthContext | null>(null);
 
+function mapServerProfile(data: Record<string, any>): Profile {
+  return {
+    username: data.username || "Anonymous",
+    status: (data.status as Profile["status"]) || "online",
+    avatarUrl: data.avatar_url || "",
+    about: data.about || "",
+    pushToTalkEnabled: Boolean(data.push_to_talk_enabled),
+    pushToTalkKey: data.push_to_talk_key || "Space",
+    audioInputId: data.audio_input_id || "",
+    audioOutputId: data.audio_output_id || "",
+    videoInputId: data.video_input_id || "",
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
+  const [token, setTokenState] = useState<string | null>(getToken());
+  const [user, setUser] = useState<UserInfo | null>(null);
+  const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
   const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState({
-    username: "Anonymous",
-    status: "online" as "online" | "offline" | "away" | "dnd",
-    avatarUrl: "",
-    about: "",
-    pushToTalkEnabled: false,
-    pushToTalkKey: "Space",
-    audioInputId: "",
-    audioOutputId: "",
-    videoInputId: "",
-  });
+  const [serverUrl, setServerUrlState] = useState(getServerUrl());
 
+  function handleSetServerUrl(url: string) {
+    _setServerUrl(url);
+    setServerUrlState(url);
+    resetSocket();
+  }
+
+  // On mount, validate existing token
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
+    const saved = getToken();
+    if (!saved) {
       setLoading(false);
-    });
+      return;
+    }
 
-    // Listen for auth changes (handles OAuth redirects too)
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    apiFetch("/api/auth/me")
+      .then((res) => {
+        if (!res.ok) throw new Error("Invalid token");
+        return res.json();
+      })
+      .then((data) => {
+        setUser({ id: data.id, email: data.email, isAdmin: data.isAdmin || false });
+        setProfile(mapServerProfile(data));
+        setTokenState(saved);
+      })
+      .catch(() => {
+        setToken(null);
+        setTokenState(null);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
-  const user = session?.user ?? null;
-
-  function fallbackProfile(targetUser: User | null) {
-    const fallbackUsername =
-      targetUser?.user_metadata?.username ||
-      targetUser?.user_metadata?.full_name ||
-      targetUser?.email?.split("@")[0] ||
-      "Anonymous";
-
-    return {
-      username: fallbackUsername,
-      status: (targetUser?.user_metadata?.status as
-        | "online"
-        | "offline"
-        | "away"
-        | "dnd") ?? "online",
-      avatarUrl: "",
-      about: (targetUser?.user_metadata?.about as string) ?? "",
-      pushToTalkEnabled:
-        (targetUser?.user_metadata?.push_to_talk_enabled as boolean) ?? false,
-      pushToTalkKey:
-        (targetUser?.user_metadata?.push_to_talk_key as string) ?? "Space",
-      audioInputId:
-        (targetUser?.user_metadata?.audio_input_id as string) ?? "",
-      audioOutputId:
-        (targetUser?.user_metadata?.audio_output_id as string) ?? "",
-      videoInputId:
-        (targetUser?.user_metadata?.video_input_id as string) ?? "",
-    };
-  }
-
-  const username = profile.username;
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function syncProfile() {
-      if (!user) {
-        setProfile(fallbackProfile(null));
-        return;
-      }
-
-      const fallback = fallbackProfile(user);
-      setProfile(fallback);
-
-      const { data, error } = await supabase
-        .from("users")
-        .select(
-          "username, status, avatar_url, about, push_to_talk_enabled, push_to_talk_key, audio_input_id, audio_output_id, video_input_id",
-        )
-        .eq("id", user.id)
-        .maybeSingle();
-
-      if (cancelled) return;
-
-      if (error) {
-        return;
-      }
-
-      if (!data) {
-        await supabase.from("users").upsert(
-          {
-            id: user.id,
-            email: user.email,
-            username: fallback.username,
-            status: fallback.status,
-            avatar_url: fallback.avatarUrl || null,
-            about: fallback.about || null,
-            push_to_talk_enabled: fallback.pushToTalkEnabled,
-            push_to_talk_key: fallback.pushToTalkKey,
-            audio_input_id: fallback.audioInputId || null,
-            audio_output_id: fallback.audioOutputId || null,
-            video_input_id: fallback.videoInputId || null,
-          },
-          { onConflict: "id" },
-        );
-        if (!cancelled) {
-          setProfile(fallback);
-        }
-        return;
-      }
-
-      setProfile({
-        username: data.username || fallback.username,
-        status: (data.status as "online" | "offline" | "away" | "dnd") || "online",
-        avatarUrl: data.avatar_url || "",
-        about: data.about || "",
-        pushToTalkEnabled: data.push_to_talk_enabled ?? false,
-        pushToTalkKey: data.push_to_talk_key || "Space",
-        audioInputId: data.audio_input_id || "",
-        audioOutputId: data.audio_output_id || "",
-        videoInputId: data.video_input_id || "",
-      });
-    }
-
-    syncProfile();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id]);
-
   async function signInWithPassword(email: string, password: string) {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    return { error: error?.message ?? null };
-  }
+    try {
+      const res = await apiFetch("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email, password }),
+      });
 
-  async function signUp(email: string, password: string, username: string) {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { username },
-      },
-    });
-    if (!error && data.user) {
-      await supabase.from("users").upsert(
-        {
-          id: data.user.id,
-          email,
-          username,
-          status: "online",
-          push_to_talk_enabled: false,
-          push_to_talk_key: "Space",
-          audio_input_id: null,
-          audio_output_id: null,
-          video_input_id: null,
-        },
-        { onConflict: "id" },
-      );
+      const data = await res.json();
+      if (!res.ok) {
+        return { error: data.error || "Login failed" };
+      }
+
+      setToken(data.token);
+      setTokenState(data.token);
+      setUser({ id: data.user.id, email: data.user.email, isAdmin: data.user.isAdmin || false });
+
+      // Fetch full profile
+      const profileRes = await apiFetch("/api/auth/me");
+      if (profileRes.ok) {
+        const profileData = await profileRes.json();
+        setProfile(mapServerProfile(profileData));
+      }
+
+      return { error: null };
+    } catch (err) {
+      return {
+        error: err instanceof Error ? err.message : "Connection failed",
+      };
     }
-    return { error: error?.message ?? null };
   }
 
-  async function signInWithGoogle() {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: window.location.origin,
-      },
-    });
-    return { error: error?.message ?? null };
+  async function signUp(email: string, password: string, username: string, inviteCode?: string) {
+    try {
+      const res = await apiFetch("/api/auth/register", {
+        method: "POST",
+        body: JSON.stringify({ email, password, username, inviteCode }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        return { error: data.error || "Registration failed" };
+      }
+
+      setToken(data.token);
+      setTokenState(data.token);
+      setUser({ id: data.user.id, email: data.user.email, isAdmin: data.user.isAdmin || false });
+      setProfile({
+        ...DEFAULT_PROFILE,
+        username: data.user.username || username,
+      });
+
+      return { error: null };
+    } catch (err) {
+      return {
+        error: err instanceof Error ? err.message : "Connection failed",
+      };
+    }
   }
 
-  async function updateProfile(update: {
-    username: string;
-    status: "online" | "offline" | "away" | "dnd";
-    avatarUrl: string;
-    about: string;
-    pushToTalkEnabled: boolean;
-    pushToTalkKey: string;
-    audioInputId: string;
-    audioOutputId: string;
-    videoInputId: string;
-  }) {
+  async function updateProfileFn(update: Profile) {
     if (!user) {
       return { error: "Not authenticated." };
     }
 
-    const payload = {
-      username: update.username.trim(),
-      status: update.status,
-      avatar_url: update.avatarUrl.trim(),
-      about: update.about.trim(),
-      push_to_talk_enabled: update.pushToTalkEnabled,
-      push_to_talk_key: update.pushToTalkKey.trim() || "Space",
-      audio_input_id: update.audioInputId || null,
-      audio_output_id: update.audioOutputId || null,
-      video_input_id: update.videoInputId || null,
-      updated_at: new Date().toISOString(),
-    };
+    try {
+      const res = await apiFetch("/api/auth/profile", {
+        method: "PUT",
+        body: JSON.stringify({
+          username: update.username.trim(),
+          status: update.status,
+          avatar_url: update.avatarUrl.trim(),
+          about: update.about.trim(),
+          push_to_talk_enabled: update.pushToTalkEnabled ? 1 : 0,
+          push_to_talk_key: update.pushToTalkKey.trim() || "Space",
+          audio_input_id: update.audioInputId || null,
+          audio_output_id: update.audioOutputId || null,
+          video_input_id: update.videoInputId || null,
+        }),
+      });
 
-    const { error: dbError } = await supabase.from("users").upsert(
-      {
-        id: user.id,
-        email: user.email,
-        ...payload,
-      },
-      { onConflict: "id" },
-    );
+      const data = await res.json();
+      if (!res.ok) {
+        return { error: data.error || "Update failed" };
+      }
 
-    if (dbError) {
-      return { error: dbError.message };
+      setProfile(mapServerProfile(data));
+      return { error: null };
+    } catch (err) {
+      return {
+        error: err instanceof Error ? err.message : "Connection failed",
+      };
     }
-
-    await supabase.auth.updateUser({
-      data: {
-        username: payload.username,
-        status: payload.status,
-        avatar_url: payload.avatar_url,
-        about: payload.about,
-        push_to_talk_enabled: payload.push_to_talk_enabled,
-        push_to_talk_key: payload.push_to_talk_key,
-        audio_input_id: payload.audio_input_id,
-        audio_output_id: payload.audio_output_id,
-        video_input_id: payload.video_input_id,
-      },
-    });
-
-    setProfile({
-      username: payload.username,
-      status: payload.status,
-      avatarUrl: payload.avatar_url,
-      about: payload.about,
-      pushToTalkEnabled: payload.push_to_talk_enabled,
-      pushToTalkKey: payload.push_to_talk_key,
-      audioInputId: payload.audio_input_id || "",
-      audioOutputId: payload.audio_output_id || "",
-      videoInputId: payload.video_input_id || "",
-    });
-
-    return { error: null };
   }
 
   async function signOut() {
-    await supabase.auth.signOut();
+    setToken(null);
+    setTokenState(null);
+    setUser(null);
+    setProfile(DEFAULT_PROFILE);
+    resetSocket();
   }
 
   return (
     <AuthContext.Provider
       value={{
-        session,
+        token,
         user,
-        username,
+        username: profile.username,
         profile,
         loading,
+        serverUrl,
+        setServerUrl: handleSetServerUrl,
         signInWithPassword,
         signUp,
-        signInWithGoogle,
-        updateProfile,
+        updateProfile: updateProfileFn,
         signOut,
       }}
     >

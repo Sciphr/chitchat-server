@@ -11,11 +11,10 @@ interface SocketContextValue {
 const SocketContext = createContext<SocketContextValue | null>(null);
 
 export function SocketProvider({ children }: { children: ReactNode }) {
-  const { session } = useAuth();
+  const { token } = useAuth();
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    const token = session?.access_token;
     const socket = getSocket();
 
     function onConnect() {
@@ -42,7 +41,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     if (socket.connected) {
       socket.disconnect();
     }
-    connectSocket(token);
+    connectSocket();
 
     if (socket.connected) {
       setIsConnected(true);
@@ -52,7 +51,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
     };
-  }, [session?.access_token]);
+  }, [token]);
 
   const value = useMemo(
     () => ({ socket: getSocket(), isConnected }),

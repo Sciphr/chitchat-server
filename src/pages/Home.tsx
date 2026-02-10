@@ -10,7 +10,7 @@ import type { Room, VoiceControls } from "../types";
 
 export default function Home() {
   const navigate = useNavigate();
-  const { session, user, username, profile, loading, signOut } = useAuth();
+  const { token, user, profile, loading, signOut } = useAuth();
   const { socket, isConnected } = useSocket();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [activeRoom, setActiveRoom] = useState<Room | null>(null);
@@ -22,10 +22,10 @@ export default function Home() {
 
   // Redirect to login if not authenticated
   useEffect(() => {
-    if (!loading && !session) {
+    if (!loading && !token) {
       navigate("/login");
     }
-  }, [loading, session, navigate]);
+  }, [loading, token, navigate]);
 
   // Identify user to server when connected
   useEffect(() => {
@@ -80,14 +80,14 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-[var(--bg-primary)]">
+      <div className="flex items-center justify-center flex-1 bg-[var(--bg-primary)]">
         <div className="text-[var(--text-muted)]">Loading...</div>
       </div>
     );
   }
 
   return (
-    <div className="relative flex h-screen bg-[var(--bg-primary)]">
+    <div className="relative flex flex-1 bg-[var(--bg-primary)]">
       <div className="absolute inset-0 app-bg" />
 
       <div className="relative z-10 flex w-full h-full p-4 gap-5">

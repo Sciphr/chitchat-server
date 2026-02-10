@@ -1,6 +1,4 @@
--- ChitChat Database Schema (SQLite)
--- This is a reference file. The server auto-creates the database on first run.
-
+export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   username TEXT UNIQUE NOT NULL,
@@ -54,8 +52,16 @@ CREATE INDEX IF NOT EXISTS idx_messages_room_id ON messages(room_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_friends_user_id ON friends(user_id);
 CREATE INDEX IF NOT EXISTS idx_friends_friend_id ON friends(friend_id);
+`;
 
--- Default rooms
-INSERT OR IGNORE INTO rooms (id, name, type, created_by) VALUES ('general', 'general', 'text', 'system');
-INSERT OR IGNORE INTO rooms (id, name, type, created_by) VALUES ('random', 'random', 'text', 'system');
-INSERT OR IGNORE INTO rooms (id, name, type, created_by) VALUES ('voice-lobby', 'Lobby', 'voice', 'system');
+import { getConfig } from "../config.js";
+
+export function getSeedSQL(): string {
+  const config = getConfig();
+  return config.rooms.defaults
+    .map(
+      (r) =>
+        `INSERT OR IGNORE INTO rooms (id, name, type, created_by) VALUES ('${r.id.replace(/'/g, "''")}', '${r.name.replace(/'/g, "''")}', '${r.type}', 'system');`
+    )
+    .join("\n");
+}

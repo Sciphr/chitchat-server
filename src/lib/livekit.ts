@@ -1,4 +1,5 @@
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:3001";
+import { getServerUrl, getToken } from "./api";
+
 const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL || "";
 
 export function getLiveKitUrl(): string {
@@ -10,9 +11,17 @@ export async function fetchLiveKitToken(params: {
   userId: string;
   username: string;
 }): Promise<string> {
-  const res = await fetch(`${SERVER_URL}/api/livekit/token`, {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const token = getToken();
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${getServerUrl()}/api/livekit/token`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(params),
   });
 

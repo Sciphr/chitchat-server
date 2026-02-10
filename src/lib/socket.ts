@@ -1,12 +1,11 @@
 import { io, Socket } from "socket.io-client";
-
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:3001";
+import { getServerUrl, getToken } from "./api";
 
 let socket: Socket | null = null;
 
 export function getSocket(): Socket {
   if (!socket) {
-    socket = io(SERVER_URL, {
+    socket = io(getServerUrl(), {
       autoConnect: false,
       transports: ["websocket", "polling"],
     });
@@ -14,8 +13,9 @@ export function getSocket(): Socket {
   return socket;
 }
 
-export function connectSocket(token?: string): Socket {
+export function connectSocket(): Socket {
   const s = getSocket();
+  const token = getToken();
   if (token) {
     s.auth = { token };
   }
@@ -28,4 +28,9 @@ export function disconnectSocket(): void {
     socket.disconnect();
     socket = null;
   }
+}
+
+/** Dispose the current socket so the next getSocket() uses the current server URL */
+export function resetSocket(): void {
+  disconnectSocket();
 }

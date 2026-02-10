@@ -1,6 +1,8 @@
 import type { Server, Socket } from "socket.io";
-import { getSupabase } from "../db/supabase.js";
 import crypto from "crypto";
+import { getDb } from "../db/database.js";
+import { getConfig } from "../config.js";
+import { verifyToken } from "../middleware/auth.js";
 
 interface ConnectedUser {
   socketId: string;
@@ -9,81 +11,47 @@ interface ConnectedUser {
   avatarUrl?: string;
 }
 
-// In-memory store of connected users (replace with Redis for multi-instance)
 const connectedUsers = new Map<string, ConnectedUser>();
 
-// In-memory message store (used when Supabase is not configured)
-const inMemoryMessages = new Map<string, Array<{
-  id: string;
-  room_id: string;
-  user_id: string;
-  username: string;
-  avatar_url?: string;
-  content: string;
-  created_at: string;
-}>>();
-
-// Default rooms served when Supabase is not configured
-const DEFAULT_ROOMS = [
-  { id: "general", name: "general", type: "text", created_by: "system", created_at: new Date().toISOString() },
-  { id: "random", name: "random", type: "text", created_by: "system", created_at: new Date().toISOString() },
-  { id: "voice-lobby", name: "Lobby", type: "voice", created_by: "system", created_at: new Date().toISOString() },
-];
-
-function hasSupabase(): boolean {
-  return getSupabase() !== null;
-}
-
-async function getUserProfiles(
-  userIds: string[],
-): Promise<Record<string, { username: string; avatar_url?: string }>> {
-  const supabase = getSupabase();
-  if (!supabase || userIds.length === 0) return {};
-
-  const { data } = await supabase
-    .from("users")
-    .select("id, username, avatar_url")
-    .in("id", userIds);
-
-  const map: Record<string, { username: string; avatar_url?: string }> = {};
-  (data || []).forEach((row) => {
-    map[row.id] = {
-      username: row.username,
-      avatar_url: row.avatar_url || undefined,
-    };
-  });
-  return map;
-}
-
-async function getUserProfile(
-  userId: string,
-  fallback?: { username?: string; avatar_url?: string },
-): Promise<{ username: string; avatar_url?: string }> {
-  const supabase = getSupabase();
-  if (!supabase) {
-    return {
-      username: fallback?.username || "Anonymous",
-      avatar_url: fallback?.avatar_url,
-    };
-  }
-
-  const { data } = await supabase
-    .from("users")
-    .select("username, avatar_url")
-    .eq("id", userId)
-    .maybeSingle();
-
-  return {
-    username: data?.username || fallback?.username || "Anonymous",
-    avatar_url: data?.avatar_url || fallback?.avatar_url,
-  };
-}
-
 export function setupSocketHandlers(io: Server) {
-  io.on("connection", (socket: Socket) => {
-    console.log(`Client connected: ${socket.id}`);
+  // Authenticate socket connections via JWT
+  io.use((socket, next) => {
+    const token = socket.handshake.auth.token;
+    if (!token) {
+      return next(new Error("Authentication required"));
+    }
+    try {
+      const payload = verifyToken(token);
+      (socket as any).user = payload;
+      next();
+    } catch {
+      next(new Error("Invalid token"));
+    }
+  });
 
-    // User identifies themselves with their auth info
+  io.on("connection", (socket: Socket) => {
+    const jwtUser = (socket as any).user as {
+      userId: string;
+      username: string;
+      email: string;
+      isAdmin: boolean;
+    };
+    console.log(`Client connected: ${jwtUser.username} (${socket.id})`);
+
+    // Auto-register the connected user from their JWT
+    connectedUsers.set(socket.id, {
+      socketId: socket.id,
+      userId: jwtUser.userId,
+      username: jwtUser.username,
+    });
+
+    // Update user status to online
+    const db = getDb();
+    db.prepare("UPDATE users SET status = 'online' WHERE id = ?").run(
+      jwtUser.userId
+    );
+
+    // User identifies themselves (updates avatar, etc.)
     socket.on(
       "user:identify",
       ({
@@ -101,93 +69,70 @@ export function setupSocketHandlers(io: Server) {
           username,
           avatarUrl,
         });
-        console.log(`User identified: ${username} (${userId})`);
-      },
+      }
     );
 
     // Get rooms list
-    socket.on("rooms:get", async () => {
-      if (hasSupabase()) {
-        const { data } = await getSupabase()!
-          .from("rooms")
-          .select("*")
-          .order("created_at", { ascending: true });
-        socket.emit("rooms:list", data || DEFAULT_ROOMS);
-      } else {
-        socket.emit("rooms:list", DEFAULT_ROOMS);
-      }
+    socket.on("rooms:get", () => {
+      const rooms = db
+        .prepare("SELECT * FROM rooms ORDER BY created_at ASC")
+        .all();
+      socket.emit("rooms:list", rooms);
     });
 
     // Create a room
-    socket.on("room:create", async ({ name, type }: { name: string; type: "text" | "voice" }) => {
-      const user = connectedUsers.get(socket.id);
-      const room = {
-        id: crypto.randomUUID(),
-        name,
-        type,
-        created_by: user?.username || "anonymous",
-        created_at: new Date().toISOString(),
-      };
-
-      if (hasSupabase()) {
-        const { data } = await getSupabase()!.from("rooms").insert(room).select().single();
-        if (data) {
-          const { data: allRooms } = await getSupabase()!
-            .from("rooms")
-            .select("*")
-            .order("created_at", { ascending: true });
-          io.emit("rooms:list", allRooms || []);
+    socket.on(
+      "room:create",
+      ({ name, type }: { name: string; type: "text" | "voice" }) => {
+        const config = getConfig();
+        if (!config.rooms.userCanCreate && !jwtUser.isAdmin) {
+          socket.emit("error", { message: "Only admins can create rooms on this server" });
+          return;
         }
-      } else {
-        DEFAULT_ROOMS.push(room);
-        io.emit("rooms:list", DEFAULT_ROOMS);
+
+        const user = connectedUsers.get(socket.id);
+        const id = crypto.randomUUID();
+
+        db.prepare(
+          "INSERT INTO rooms (id, name, type, created_by) VALUES (?, ?, ?, ?)"
+        ).run(id, name, type, user?.username || "anonymous");
+
+        const rooms = db
+          .prepare("SELECT * FROM rooms ORDER BY created_at ASC")
+          .all();
+        io.emit("rooms:list", rooms);
       }
-    });
+    );
 
     // Join a room
-    socket.on("room:join", async (roomId: string) => {
+    socket.on("room:join", (roomId: string) => {
       socket.join(roomId);
-      console.log(`${socket.id} joined room: ${roomId}`);
 
-      // Send message history
-      if (hasSupabase()) {
-        const { data, error } = await getSupabase()!
-          .from("messages")
-          .select("id, room_id, user_id, content, created_at")
-          .eq("room_id", roomId)
-          .order("created_at", { ascending: true })
-          .limit(50);
-        if (error) {
-          console.error("Failed to load message history:", error.message);
-        }
+      const config = getConfig();
+      const messages = db
+        .prepare(
+          `SELECT m.id, m.room_id, m.user_id, m.content, m.created_at,
+                  u.username, u.avatar_url
+           FROM messages m
+           LEFT JOIN users u ON m.user_id = u.id
+           WHERE m.room_id = ?
+           ORDER BY m.created_at ASC
+           LIMIT ?`
+        )
+        .all(roomId, config.messageHistoryLimit);
 
-        const userIds = Array.from(
-          new Set((data || []).map((m) => m.user_id)),
-        );
-        const profiles = await getUserProfiles(userIds);
-
-        const enriched = (data || []).map((msg) => ({
-          ...msg,
-          username: profiles[msg.user_id]?.username || "Anonymous",
-          avatar_url: profiles[msg.user_id]?.avatar_url,
-        }));
-
-        socket.emit("message:history", enriched);
-      } else {
-        socket.emit("message:history", inMemoryMessages.get(roomId) || []);
-      }
+      socket.emit("message:history", messages);
     });
 
     // Leave a room
     socket.on("room:leave", (roomId: string) => {
       socket.leave(roomId);
-      console.log(`${socket.id} left room: ${roomId}`);
     });
 
     // Send a message
     socket.on(
       "message:send",
-      async (
+      (
         {
           room_id,
           content,
@@ -198,77 +143,57 @@ export function setupSocketHandlers(io: Server) {
           error?: string;
           message?: Record<string, unknown>;
           client_nonce?: string;
-        }) => void,
+        }) => void
       ) => {
-      const user = connectedUsers.get(socket.id);
-      const message = {
-        id: crypto.randomUUID(),
-        room_id,
-        user_id: user?.userId || socket.id,
-        content,
-        created_at: new Date().toISOString(),
-      };
+        const config = getConfig();
 
-      try {
-        if (hasSupabase()) {
-          const { error: insertError } = await getSupabase()!
-            .from("messages")
-            .insert({
-              id: message.id,
-              room_id: message.room_id,
-              user_id: message.user_id,
-              content: message.content,
-              created_at: message.created_at,
-            });
-          if (insertError) {
-            throw new Error(insertError.message);
-          }
-
-          const profile = await getUserProfile(message.user_id, {
-            username: user?.username,
-            avatar_url: user?.avatarUrl,
-          });
-          const payload = {
-            ...message,
-            username: profile.username,
-            avatar_url: profile.avatar_url,
-            client_nonce,
-          };
-          io.to(room_id).emit("message:new", payload);
+        if (content.length > config.maxMessageLength) {
           if (ack) {
-            ack({ ok: true, message: payload, client_nonce });
+            ack({ ok: false, error: `Message exceeds maximum length of ${config.maxMessageLength} characters`, client_nonce });
           }
-        } else {
-          if (!inMemoryMessages.has(room_id)) {
-            inMemoryMessages.set(room_id, []);
-          }
-          const username = user?.username || "Anonymous";
-          const avatar_url = user?.avatarUrl;
-          inMemoryMessages
-            .get(room_id)!
-            .push({ ...message, username, avatar_url });
-
-          const payload = {
-            ...message,
-            username,
-            avatar_url,
-            client_nonce,
-          };
-          // Broadcast to everyone in the room
-          io.to(room_id).emit("message:new", payload);
-          if (ack) {
-            ack({ ok: true, message: payload, client_nonce });
-          }
+          return;
         }
-      } catch (err) {
-        const errorMessage =
-          err instanceof Error ? err.message : "Failed to send message";
-        console.error("Failed to insert message:", errorMessage);
-        if (ack) {
-          ack({ ok: false, error: errorMessage, client_nonce });
+
+        const user = connectedUsers.get(socket.id);
+        const id = crypto.randomUUID();
+        const created_at = new Date().toISOString();
+        const userId = user?.userId || socket.id;
+
+        try {
+          db.prepare(
+            "INSERT INTO messages (id, room_id, user_id, content, created_at) VALUES (?, ?, ?, ?, ?)"
+          ).run(id, room_id, userId, content, created_at);
+
+          const profile = db
+            .prepare("SELECT username, avatar_url FROM users WHERE id = ?")
+            .get(userId) as
+            | { username: string; avatar_url: string | null }
+            | undefined;
+
+          const payload = {
+            id,
+            room_id,
+            user_id: userId,
+            content,
+            created_at,
+            username: profile?.username || user?.username || "Anonymous",
+            avatar_url: profile?.avatar_url || user?.avatarUrl,
+            client_nonce,
+          };
+
+          io.to(room_id).emit("message:new", payload);
+          if (ack) {
+            ack({ ok: true, message: payload, client_nonce });
+          }
+        } catch (err) {
+          const errorMessage =
+            err instanceof Error ? err.message : "Failed to send message";
+          console.error("Failed to insert message:", errorMessage);
+          if (ack) {
+            ack({ ok: false, error: errorMessage, client_nonce });
+          }
         }
       }
-    },
     );
 
     // Disconnect
@@ -276,6 +201,9 @@ export function setupSocketHandlers(io: Server) {
       const user = connectedUsers.get(socket.id);
       if (user) {
         console.log(`User disconnected: ${user.username}`);
+        db.prepare("UPDATE users SET status = 'offline' WHERE id = ?").run(
+          user.userId
+        );
       }
       connectedUsers.delete(socket.id);
     });

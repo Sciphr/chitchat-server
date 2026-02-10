@@ -105,14 +105,15 @@ export default function ChatRoom({
         }
 
         setMessages((prev) => {
+          const confirmed: Message = { ...ack.message!, pending: false } as Message;
           const index = prev.findIndex(
             (msg) => msg.client_nonce === nonce,
           );
           if (index === -1) {
-            return [...prev, { ...ack.message, pending: false }];
+            return [...prev, confirmed];
           }
           const next = [...prev];
-          next[index] = { ...ack.message, pending: false };
+          next[index] = confirmed;
           return next;
         });
       },

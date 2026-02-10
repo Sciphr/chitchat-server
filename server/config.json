@@ -1,0 +1,43 @@
+{
+  "serverName": "My ChitChat Server",
+  "port": 3001,
+  "jwtSecret": "change-me-in-production",
+  "jwtExpiryDays": 7,
+  "dbPath": "./chitchat.db",
+  "maxUsers": 0,
+  "messageHistoryLimit": 50,
+  "maxMessageLength": 2000,
+  "messageRetentionDays": 0,
+  "registration": {
+    "open": true,
+    "inviteOnly": false,
+    "inviteCode": "",
+    "emailAllowlist": [],
+    "emailBlocklist": []
+  },
+  "rooms": {
+    "userCanCreate": true,
+    "defaults": [
+      {
+        "id": "general",
+        "name": "general",
+        "type": "text"
+      },
+      {
+        "id": "random",
+        "name": "random",
+        "type": "text"
+      },
+      {
+        "id": "voice-lobby",
+        "name": "Lobby",
+        "type": "voice"
+      }
+    ]
+  },
+  "adminEmails": [],
+  "livekit": {
+    "apiKey": "your_key",
+    "apiSecret": "your_secret"
+  }
+}

@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./hooks/useAuth";
 import { SocketProvider } from "./hooks/useSocket";
+import TitleBar from "./components/layout/TitleBar";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Settings from "./pages/Settings";
@@ -10,6 +11,7 @@ function App() {
     <AuthProvider>
       <SocketProvider>
         <BrowserRouter>
+          <TitleBar />
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/login" element={<Login />} />
