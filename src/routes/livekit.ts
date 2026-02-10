@@ -3,7 +3,7 @@ import { AccessToken } from "livekit-server-sdk";
 
 const router = Router();
 
-router.post("/token", (req, res) => {
+router.post("/token", async (req, res) => {
   const apiKey = process.env.LIVEKIT_API_KEY;
   const apiSecret = process.env.LIVEKIT_API_SECRET;
 
@@ -35,7 +35,7 @@ router.post("/token", (req, res) => {
     canSubscribe: true,
   });
 
-  const token = at.toJwt();
+  const token = await at.toJwt();
   res.json({ token });
 });
 
