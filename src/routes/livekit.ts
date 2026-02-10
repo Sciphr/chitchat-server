@@ -1,11 +1,13 @@
 import { Router } from "express";
 import { AccessToken } from "livekit-server-sdk";
+import { getConfig } from "../config.js";
 
 const router = Router();
 
 router.post("/token", async (req, res) => {
-  const apiKey = process.env.LIVEKIT_API_KEY;
-  const apiSecret = process.env.LIVEKIT_API_SECRET;
+  const config = getConfig();
+  const apiKey = config.livekit.apiKey;
+  const apiSecret = config.livekit.apiSecret;
 
   if (!apiKey || !apiSecret) {
     res.status(503).json({ error: "LiveKit not configured on this server" });

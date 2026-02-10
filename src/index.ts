@@ -1,22 +1,32 @@
 import "dotenv/config";
+import path from "path";
 import express from "express";
 import cors from "cors";
 import { createServer } from "http";
 import { Server } from "socket.io";
+import { loadConfig } from "./config.js";
+import { getDb, closeDb } from "./db/database.js";
 import { setupSocketHandlers } from "./websocket/handler.js";
 import authRoutes from "./routes/auth.js";
 import roomsRoutes from "./routes/rooms.js";
 import livekitRoutes from "./routes/livekit.js";
+import serverInfoRoutes from "./routes/serverInfo.js";
+import adminRoutes from "./routes/admin.js";
 
-const PORT = parseInt(process.env.PORT || "3001", 10);
+// Load config first (reads/generates config.json, applies env overrides)
+const config = loadConfig();
+
+// Initialize database
+const db = getDb();
+console.log(`  Database: ${db.name}`);
 
 const app = express();
 const httpServer = createServer(app);
 
-// Socket.io server
+// Socket.io server — allow all origins for self-hosted flexibility
 const io = new Server(httpServer, {
   cors: {
-    origin: ["http://localhost:1420", "http://localhost:5173", "tauri://localhost"],
+    origin: "*",
     methods: ["GET", "POST"],
   },
 });
@@ -29,6 +39,13 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/rooms", roomsRoutes);
 app.use("/api/livekit", livekitRoutes);
+app.use("/api/server", serverInfoRoutes);
+app.use("/api/admin", adminRoutes);
+
+// Standalone admin page (served from server/admin/index.html)
+app.get("/admin", (_req, res) => {
+  res.sendFile(path.join(process.cwd(), "admin", "index.html"));
+});
 
 // Health check
 app.get("/api/health", (_req, res) => {
@@ -38,13 +55,37 @@ app.get("/api/health", (_req, res) => {
 // Setup WebSocket handlers
 setupSocketHandlers(io);
 
-// Start server
-httpServer.listen(PORT, () => {
-  console.log(`\n  ChitChat Server running on http://localhost:${PORT}`);
-  console.log(`  WebSocket ready for connections\n`);
+// Message retention cleanup
+if (config.messageRetentionDays > 0) {
+  const cleanup = () => {
+    const cutoff = new Date(
+      Date.now() - config.messageRetentionDays * 86400000
+    ).toISOString();
+    const result = db
+      .prepare("DELETE FROM messages WHERE created_at < ?")
+      .run(cutoff);
+    if (result.changes > 0) {
+      console.log(`  Retention: pruned ${result.changes} old messages`);
+    }
+  };
+  cleanup(); // run once on startup
+  setInterval(cleanup, 3600000); // then hourly
+}
 
-  if (!process.env.SUPABASE_URL) {
-    console.log("  ⚠ Supabase not configured — using in-memory storage");
-    console.log("  Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in server/.env\n");
-  }
+// Start server
+httpServer.listen(config.port, () => {
+  console.log(`\n  ${config.serverName}`);
+  console.log(`  Running on http://localhost:${config.port}`);
+  console.log(`  WebSocket ready for connections\n`);
+});
+
+// Graceful shutdown
+process.on("SIGINT", () => {
+  closeDb();
+  process.exit(0);
+});
+
+process.on("SIGTERM", () => {
+  closeDb();
+  process.exit(0);
 });
