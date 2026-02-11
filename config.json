@@ -16,7 +16,7 @@
     "emailBlocklist": []
   },
   "rooms": {
-    "userCanCreate": true,
+    "userCanCreate": false,
     "defaults": [
       {
         "id": "general",
@@ -35,9 +35,11 @@
       }
     ]
   },
-  "adminEmails": [],
+  "adminEmails": [
+    "jacobtberry@proton.me"
+  ],
   "livekit": {
-    "apiKey": "your_key",
-    "apiSecret": "your_secret"
+    "apiKey": "devkey",
+    "apiSecret": "secret"
   }
 }

@@ -124,6 +124,9 @@ router.post("/login", (req, res) => {
     return;
   }
 
+  // Set user online on login
+  db.prepare("UPDATE users SET status = 'online' WHERE id = ?").run(user.id);
+
   const isAdmin = config.adminEmails.includes(user.email);
 
   const token = generateToken({

@@ -109,20 +109,51 @@ export function setupSocketHandlers(io: Server) {
       socket.join(roomId);
 
       const config = getConfig();
+      // Get the latest N messages (sub-query so final result is ASC order)
       const messages = db
         .prepare(
-          `SELECT m.id, m.room_id, m.user_id, m.content, m.created_at,
-                  u.username, u.avatar_url
-           FROM messages m
-           LEFT JOIN users u ON m.user_id = u.id
-           WHERE m.room_id = ?
-           ORDER BY m.created_at ASC
-           LIMIT ?`
+          `SELECT * FROM (
+             SELECT m.id, m.room_id, m.user_id, m.content, m.created_at,
+                    u.username, u.avatar_url
+             FROM messages m
+             LEFT JOIN users u ON m.user_id = u.id
+             WHERE m.room_id = ?
+             ORDER BY m.created_at DESC
+             LIMIT ?
+           ) sub ORDER BY sub.created_at ASC`
         )
         .all(roomId, config.messageHistoryLimit);
 
-      socket.emit("message:history", messages);
+      const hasMore = messages.length >= config.messageHistoryLimit;
+      socket.emit("message:history", { messages, hasMore });
     });
+
+    // Load older messages before a given timestamp
+    socket.on(
+      "message:loadMore",
+      (
+        { roomId, before }: { roomId: string; before: string },
+        ack?: (payload: { messages: Record<string, unknown>[]; hasMore: boolean }) => void
+      ) => {
+        const config = getConfig();
+        const messages = db
+          .prepare(
+            `SELECT * FROM (
+               SELECT m.id, m.room_id, m.user_id, m.content, m.created_at,
+                      u.username, u.avatar_url
+               FROM messages m
+               LEFT JOIN users u ON m.user_id = u.id
+               WHERE m.room_id = ? AND m.created_at < ?
+               ORDER BY m.created_at DESC
+               LIMIT ?
+             ) sub ORDER BY sub.created_at ASC`
+          )
+          .all(roomId, before, config.messageHistoryLimit) as Record<string, unknown>[];
+
+        const hasMore = messages.length >= config.messageHistoryLimit;
+        if (ack) ack({ messages, hasMore });
+      }
+    );
 
     // Leave a room
     socket.on("room:leave", (roomId: string) => {
@@ -193,6 +224,34 @@ export function setupSocketHandlers(io: Server) {
             ack({ ok: false, error: errorMessage, client_nonce });
           }
         }
+      }
+    );
+
+    // Delete a message
+    socket.on(
+      "message:delete",
+      (
+        { messageId }: { messageId: string },
+        ack?: (payload: { ok: boolean; error?: string }) => void
+      ) => {
+        const msg = db
+          .prepare("SELECT id, room_id, user_id FROM messages WHERE id = ?")
+          .get(messageId) as { id: string; room_id: string; user_id: string } | undefined;
+
+        if (!msg) {
+          if (ack) ack({ ok: false, error: "Message not found" });
+          return;
+        }
+
+        // Only the author or an admin can delete
+        if (msg.user_id !== jwtUser.userId && !jwtUser.isAdmin) {
+          if (ack) ack({ ok: false, error: "Not authorized to delete this message" });
+          return;
+        }
+
+        db.prepare("DELETE FROM messages WHERE id = ?").run(messageId);
+        io.to(msg.room_id).emit("message:deleted", { messageId, room_id: msg.room_id });
+        if (ack) ack({ ok: true });
       }
     );
 
