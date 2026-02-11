@@ -10,6 +10,11 @@ if (savedTheme) {
   document.documentElement.dataset.theme = savedTheme;
 }
 
+// Disable native/browser context menu in the app window.
+document.addEventListener("contextmenu", (event) => {
+  event.preventDefault();
+});
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <App />

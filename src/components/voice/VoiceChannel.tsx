@@ -12,6 +12,7 @@ import {
   isTrackReference,
 } from "@livekit/components-react";
 import { Track, RoomEvent, RemoteAudioTrack, VideoPresets } from "livekit-client";
+import { Volume2 } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
 import { fetchLiveKitToken, getLiveKitUrl, resolveResolution, clampResolution, clampFps } from "../../lib/livekit";
 import type { MediaLimits } from "../../lib/livekit";
@@ -33,6 +34,8 @@ function VoiceRoomContent({
   onLeave,
   pushToTalkEnabled,
   pushToTalkKey,
+  preferredAudioInputId,
+  preferredAudioOutputId,
   roomId,
   mediaLimits,
   onParticipantsChange,
@@ -41,6 +44,8 @@ function VoiceRoomContent({
   onLeave: () => void;
   pushToTalkEnabled: boolean;
   pushToTalkKey: string;
+  preferredAudioInputId: string;
+  preferredAudioOutputId: string;
   roomId: string;
   mediaLimits: MediaLimits;
   onParticipantsChange?: (roomId: string, participants: VoiceParticipant[]) => void;
@@ -60,6 +65,8 @@ function VoiceRoomContent({
   const [manualMute, setManualMute] = useState(false);
   const [deafened, setDeafened] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [audioInputDeviceId, setAudioInputDeviceId] = useState("");
+  const [audioOutputDeviceId, setAudioOutputDeviceId] = useState("");
 
   const formattedKey = useMemo(() => {
     if (!pushToTalkKey) return "Space";
@@ -113,6 +120,33 @@ function VoiceRoomContent({
     };
   }, [room, deafened]);
 
+  // Apply preferred audio devices when joining room
+  useEffect(() => {
+    let cancelled = false;
+    async function applyPreferredDevices() {
+      try {
+        if (preferredAudioInputId) {
+          await room.switchActiveDevice("audioinput", preferredAudioInputId);
+          if (!cancelled) setAudioInputDeviceId(preferredAudioInputId);
+        }
+      } catch {
+        // Keep default device if preferred is unavailable
+      }
+      try {
+        if (preferredAudioOutputId) {
+          await room.switchActiveDevice("audiooutput", preferredAudioOutputId);
+          if (!cancelled) setAudioOutputDeviceId(preferredAudioOutputId);
+        }
+      } catch {
+        // Keep default output if preferred is unavailable
+      }
+    }
+    applyPreferredDevices();
+    return () => {
+      cancelled = true;
+    };
+  }, [room, preferredAudioInputId, preferredAudioOutputId]);
+
   // Push-to-talk keyboard handler
   useEffect(() => {
     if (!room || !pushToTalkEnabled) return;
@@ -152,7 +186,8 @@ function VoiceRoomContent({
     const mapped = participants.map((participant) => ({
       id: participant.identity,
       name: participant.name || participant.identity,
-      isSpeaking: participant.isSpeaking ?? false,
+      // Use audioLevel as an immediate hint to reduce speaking-indicator lag.
+      isSpeaking: (participant.audioLevel ?? 0) > 0.02 || (participant.isSpeaking ?? false),
     }));
     onParticipantsChange(roomId, mapped);
 
@@ -187,12 +222,10 @@ function VoiceRoomContent({
 
   const toggleVideo = useCallback(() => {
     if (!isCameraEnabled) {
-      // Read user preference from localStorage, clamp to server limits
-      const userRes = localStorage.getItem("chitchat-camera-resolution") || "720p";
-      const userFps = parseInt(localStorage.getItem("chitchat-camera-fps") || "30", 10);
-      const clampedRes = clampResolution(userRes, mediaLimits.maxVideoResolution);
-      const clampedFps = clampFps(userFps, mediaLimits.maxVideoFps);
-      const dims = resolveResolution(clampedRes);
+      // Fixed camera quality profile for predictable behavior.
+      const defaultRes = "720p";
+      const defaultFps = 30;
+      const dims = resolveResolution(defaultRes);
       // Map to a VideoPreset for appropriate encoding bitrate
       const presetMap: Record<string, typeof VideoPresets.h720> = {
         "360p": VideoPresets.h360,
@@ -201,21 +234,21 @@ function VoiceRoomContent({
         "1080p": VideoPresets.h1080,
         "1440p": VideoPresets.h1440,
       };
-      const preset = presetMap[clampedRes] || VideoPresets.h720;
+      const preset = presetMap[defaultRes] || VideoPresets.h720;
       room.localParticipant.setCameraEnabled(
         true,
         {
-          resolution: { width: dims.width, height: dims.height, frameRate: clampedFps },
+          resolution: { width: dims.width, height: dims.height, frameRate: defaultFps },
         },
         {
-          videoEncoding: { maxBitrate: preset.encoding.maxBitrate, maxFramerate: clampedFps },
+          videoEncoding: { maxBitrate: preset.encoding.maxBitrate, maxFramerate: defaultFps },
           simulcast: false,
         },
       );
     } else {
       room.localParticipant.setCameraEnabled(false);
     }
-  }, [room, isCameraEnabled, mediaLimits]);
+  }, [room, isCameraEnabled]);
 
   const toggleDeafen = useCallback(() => {
     setDeafened((prev) => {
@@ -263,6 +296,54 @@ function VoiceRoomContent({
     }
   }, [isScreenSharing, stopScreenShare, startScreenShare, mediaLimits]);
 
+  const setAudioInputDevice = useCallback(
+    async (deviceId: string) => {
+      const prevDeviceId = audioInputDeviceId;
+      setAudioInputDeviceId(deviceId);
+      if (deviceId) {
+        try {
+          await room.switchActiveDevice("audioinput", deviceId, true);
+        } catch (err) {
+          setAudioInputDeviceId(prevDeviceId);
+          throw err;
+        }
+      } else {
+        // Empty id means "system default"; non-exact constraints allow fallback.
+        try {
+          await room.switchActiveDevice("audioinput", "", false);
+        } catch (err) {
+          setAudioInputDeviceId(prevDeviceId);
+          throw err;
+        }
+      }
+    },
+    [room, audioInputDeviceId]
+  );
+
+  const setAudioOutputDevice = useCallback(
+    async (deviceId: string) => {
+      const prevDeviceId = audioOutputDeviceId;
+      setAudioOutputDeviceId(deviceId);
+      if (deviceId) {
+        try {
+          await room.switchActiveDevice("audiooutput", deviceId, true);
+        } catch (err) {
+          setAudioOutputDeviceId(prevDeviceId);
+          throw err;
+        }
+      } else {
+        // Empty id means "system default"; non-exact constraints allow fallback.
+        try {
+          await room.switchActiveDevice("audiooutput", "", false);
+        } catch (err) {
+          setAudioOutputDeviceId(prevDeviceId);
+          throw err;
+        }
+      }
+    },
+    [room, audioOutputDeviceId]
+  );
+
   const handleLeave = useCallback(() => {
     playLeave();
     room.disconnect();
@@ -283,6 +364,10 @@ function VoiceRoomContent({
       toggleScreenShare,
       startScreenShare,
       stopScreenShare,
+      setAudioInputDevice,
+      setAudioOutputDevice,
+      audioInputDeviceId,
+      audioOutputDeviceId,
       disconnect: handleLeave,
       mediaLimits: {
         maxScreenShareResolution: mediaLimits.maxScreenShareResolution,
@@ -300,6 +385,10 @@ function VoiceRoomContent({
     toggleScreenShare,
     startScreenShare,
     stopScreenShare,
+    setAudioInputDevice,
+    setAudioOutputDevice,
+    audioInputDeviceId,
+    audioOutputDeviceId,
     handleLeave,
     onVoiceControlsChange,
     mediaLimits,
@@ -419,12 +508,13 @@ function ParticipantTileCard({
   participant: ReturnType<typeof useParticipants>[number];
 }) {
   const isSpeaking = useIsSpeaking(participant);
+  const fastSpeaking = (participant.audioLevel ?? 0) > 0.02;
   const name = participant.name || participant.identity;
   const cameraPub = participant.getTrackPublication(Track.Source.Camera);
   const isCameraOn = cameraPub?.isSubscribed && !cameraPub.isMuted;
 
   return (
-    <div className={`voice-tile ${isSpeaking ? "speaking" : ""}`}>
+    <div className={`voice-tile ${isSpeaking || fastSpeaking ? "speaking" : ""}`}>
       {isCameraOn && cameraPub?.videoTrack ? (
         <VideoTrack
           trackRef={{
@@ -442,14 +532,12 @@ function ParticipantTileCard({
         </div>
       )}
       <div className="voice-tile-name">{name}</div>
-      {isSpeaking && <div className="voice-tile-speaking-ring" />}
+      {(isSpeaking || fastSpeaking) && <div className="voice-tile-speaking-ring" />}
     </div>
   );
 }
 
 const DEFAULT_MEDIA_LIMITS: MediaLimits = {
-  maxVideoResolution: "720p",
-  maxVideoFps: 30,
   maxScreenShareResolution: "1080p",
   maxScreenShareFps: 30,
 };
@@ -502,10 +590,11 @@ export default function VoiceChannel({ room, onParticipantsChange, onVoiceContro
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center px-10 py-4 border-b border-[var(--border)] bg-[var(--bg-secondary)]">
-        <span className="text-[var(--text-muted)] mr-2">[V]</span>
-        <h2 className="text-base font-semibold heading-font">{room.name}</h2>
-        <span className="ml-3 text-xs text-[var(--text-muted)]">Voice channel</span>
+      <div className="room-header">
+        <span className="room-header-icon" aria-hidden="true">
+          <Volume2 size={16} />
+        </span>
+        <h2 className="room-header-title heading-font">{room.name}</h2>
       </div>
 
       <div className="flex-1 flex flex-col bg-[var(--bg-primary)]/20 px-10 py-8">
@@ -540,6 +629,8 @@ export default function VoiceChannel({ room, onParticipantsChange, onVoiceContro
               onLeave={handleLeave}
               pushToTalkEnabled={profile.pushToTalkEnabled}
               pushToTalkKey={profile.pushToTalkKey}
+              preferredAudioInputId={profile.audioInputId}
+              preferredAudioOutputId={profile.audioOutputId}
               roomId={room.id}
               mediaLimits={mediaLimits}
               onParticipantsChange={onParticipantsChange}

@@ -12,7 +12,10 @@
       "Bash(npx tsc:*)",
       "Bash(node -e:*)",
       "Bash(git -C \"f:\\\\CODING\\\\chitchat\\\\chitchat\" log --oneline)",
-      "Bash(npx vite build)"
+      "Bash(npx vite build)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }

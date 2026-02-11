@@ -7,8 +7,6 @@ export function getLiveKitUrl(): string {
 }
 
 export interface MediaLimits {
-  maxVideoResolution: string;
-  maxVideoFps: number;
   maxScreenShareResolution: string;
   maxScreenShareFps: number;
 }
@@ -109,8 +107,6 @@ export async function fetchLiveKitToken(params: {
   return {
     token: data.token,
     mediaLimits: data.mediaLimits ?? {
-      maxVideoResolution: "720p",
-      maxVideoFps: 30,
       maxScreenShareResolution: "1080p",
       maxScreenShareFps: 30,
     },

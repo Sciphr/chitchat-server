@@ -4,12 +4,14 @@ interface MessageInputProps {
   onSend: (content: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  onTypingChange?: (isTyping: boolean) => void;
 }
 
 export default function MessageInput({
   onSend,
   disabled = false,
   placeholder = "Type a message...",
+  onTypingChange,
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
 
@@ -18,6 +20,7 @@ export default function MessageInput({
     if (message.trim() && !disabled) {
       onSend(message.trim());
       setMessage("");
+      onTypingChange?.(false);
     }
   }
 
@@ -29,7 +32,11 @@ export default function MessageInput({
       <input
         type="text"
         value={message}
-        onChange={(e) => setMessage(e.target.value)}
+        onChange={(e) => {
+          const next = e.target.value;
+          setMessage(next);
+          onTypingChange?.(next.trim().length > 0);
+        }}
         placeholder={placeholder}
         disabled={disabled}
         className="flex-1 px-4 py-3 bg-[var(--bg-input)] text-[var(--text-primary)] border border-[var(--border)] rounded-xl outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-muted)] disabled:opacity-50 chat-input-field"

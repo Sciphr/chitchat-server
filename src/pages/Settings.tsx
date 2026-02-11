@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../hooks/useAuth";
-import { VIDEO_RESOLUTIONS, FPS_OPTIONS } from "../lib/livekit";
 
 const THEMES = [
   { id: "midnight", label: "Midnight", accent: "#7c6aff", bg: "#0f0f17" },
@@ -20,26 +19,6 @@ function getTheme(): string {
 function setTheme(id: string) {
   localStorage.setItem("chitchat-theme", id);
   document.documentElement.dataset.theme = id;
-}
-
-// Camera quality localStorage helpers (up to 1080p for camera presets)
-const CAMERA_RESOLUTIONS = VIDEO_RESOLUTIONS.filter(
-  (r) => r.id !== "4k", // 4K is screen-share only
-);
-const CAMERA_FPS = FPS_OPTIONS.filter((f) => f >= 15); // 5fps doesn't make sense for camera
-
-function getCameraResolution(): string {
-  return localStorage.getItem("chitchat-camera-resolution") || "720p";
-}
-function setCameraResolution(v: string) {
-  localStorage.setItem("chitchat-camera-resolution", v);
-}
-function getCameraFps(): number {
-  const v = localStorage.getItem("chitchat-camera-fps");
-  return v ? parseInt(v, 10) : 30;
-}
-function setCameraFps(v: number) {
-  localStorage.setItem("chitchat-camera-fps", String(v));
 }
 
 const STATUS_OPTIONS = [
@@ -83,14 +62,17 @@ export default function Settings({ onClose }: SettingsProps) {
   const [success, setSuccess] = useState("");
   const [capturingKey, setCapturingKey] = useState(false);
   const [activeTheme, setActiveTheme] = useState(getTheme);
+  const [activeTab, setActiveTab] = useState<"settings" | "public-profile">(
+    "settings"
+  );
   const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([]);
   const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([]);
   const [videoInputs, setVideoInputs] = useState<MediaDeviceInfo[]>([]);
   const [deviceError, setDeviceError] = useState<string | null>(null);
-  const [camRes, setCamRes] = useState(getCameraResolution);
-  const [camFps, setCamFps] = useState(getCameraFps);
   const statusStyle =
     STATUS_STYLES[form.status] || STATUS_STYLES.online;
+  const publicStatusStyle =
+    STATUS_STYLES[profile.status] || STATUS_STYLES.online;
 
   useEffect(() => {
     setForm({
@@ -168,18 +150,54 @@ export default function Settings({ onClose }: SettingsProps) {
   async function loadDevices(requestPermissions = false) {
     setDeviceError(null);
     try {
-      if (requestPermissions && navigator.mediaDevices?.getUserMedia) {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: true,
-        });
-        stream.getTracks().forEach((track) => track.stop());
+      async function primeMediaPermissions() {
+        if (!navigator.mediaDevices?.getUserMedia) return;
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: true,
+          });
+          stream.getTracks().forEach((track) => track.stop());
+        } catch {
+          // Fallback to audio-only; some systems reject combined A/V prompts.
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: false,
+          });
+          stream.getTracks().forEach((track) => track.stop());
+        }
       }
 
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      setAudioInputs(devices.filter((d) => d.kind === "audioinput"));
-      setAudioOutputs(devices.filter((d) => d.kind === "audiooutput"));
-      setVideoInputs(devices.filter((d) => d.kind === "videoinput"));
+      if (requestPermissions) {
+        await primeMediaPermissions();
+      }
+
+      let devices = await navigator.mediaDevices.enumerateDevices();
+      let audioIn = devices.filter((d) => d.kind === "audioinput");
+      let audioOut = devices.filter((d) => d.kind === "audiooutput");
+      let videoIn = devices.filter((d) => d.kind === "videoinput");
+
+      // If we only see default entries, try a permission prime and re-enumerate.
+      if (
+        !requestPermissions &&
+        (audioIn.length <= 1 || audioOut.length <= 1) &&
+        navigator.mediaDevices?.getUserMedia
+      ) {
+        await primeMediaPermissions();
+        devices = await navigator.mediaDevices.enumerateDevices();
+        audioIn = devices.filter((d) => d.kind === "audioinput");
+        audioOut = devices.filter((d) => d.kind === "audiooutput");
+        videoIn = devices.filter((d) => d.kind === "videoinput");
+      }
+
+      setAudioInputs(audioIn);
+      setAudioOutputs(audioOut);
+      setVideoInputs(videoIn);
+      if (audioIn.length <= 1 && audioOut.length <= 1) {
+        setDeviceError("Only default devices are currently exposed. Try Refresh devices.");
+      } else {
+        setDeviceError(null);
+      }
     } catch (err) {
       setDeviceError(
         err instanceof Error ? err.message : "Unable to load devices",
@@ -189,7 +207,14 @@ export default function Settings({ onClose }: SettingsProps) {
 
   useEffect(() => {
     if (!navigator.mediaDevices?.enumerateDevices) return;
-    loadDevices(false);
+    loadDevices(true);
+    function onDeviceChange() {
+      void loadDevices(false);
+    }
+    navigator.mediaDevices.addEventListener?.("devicechange", onDeviceChange);
+    return () => {
+      navigator.mediaDevices.removeEventListener?.("devicechange", onDeviceChange);
+    };
   }, []);
 
   function labelDevice(device: MediaDeviceInfo, index: number) {
@@ -256,6 +281,27 @@ export default function Settings({ onClose }: SettingsProps) {
               className="profile-button secondary"
             >
               {isModal ? "Close" : "Back"}
+            </button>
+          </div>
+
+          <div className="settings-tabs" role="tablist" aria-label="Profile tabs">
+            <button
+              type="button"
+              className={`settings-tab ${activeTab === "settings" ? "active" : ""}`}
+              onClick={() => setActiveTab("settings")}
+              role="tab"
+              aria-selected={activeTab === "settings"}
+            >
+              Settings
+            </button>
+            <button
+              type="button"
+              className={`settings-tab ${activeTab === "public-profile" ? "active" : ""}`}
+              onClick={() => setActiveTab("public-profile")}
+              role="tab"
+              aria-selected={activeTab === "public-profile"}
+            >
+              Public Profile
             </button>
           </div>
 
@@ -328,280 +374,269 @@ export default function Settings({ onClose }: SettingsProps) {
               </div>
             </div>
 
-            <form onSubmit={handleSave} className="space-y-6">
-              <div className="profile-section">
-                <div className="profile-section-title">Identity</div>
-                <div className="profile-grid">
+            {activeTab === "settings" ? (
+              <form onSubmit={handleSave} className="space-y-6">
+                <div className="profile-section">
+                  <div className="profile-section-title">Identity</div>
+                  <div className="profile-grid">
+                    <div>
+                      <label className="profile-label">Username</label>
+                      <input
+                        className="profile-input"
+                        value={form.username}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            username: e.target.value,
+                          }))
+                        }
+                        placeholder="Your handle"
+                      />
+                    </div>
+                    <div>
+                      <label className="profile-label">Status</label>
+                      <select
+                        className="profile-select"
+                        value={form.status}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            status: e.target.value as
+                              | "online"
+                              | "offline"
+                              | "away"
+                              | "dnd",
+                          }))
+                        }
+                      >
+                        {STATUS_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="profile-section">
+                  <div className="profile-section-title">Appearance</div>
                   <div>
-                    <label className="profile-label">Username</label>
+                    <label className="profile-label">Avatar URL</label>
                     <input
                       className="profile-input"
-                      value={form.username}
+                      value={form.avatarUrl}
                       onChange={(e) =>
                         setForm((prev) => ({
                           ...prev,
-                          username: e.target.value,
+                          avatarUrl: e.target.value,
                         }))
                       }
-                      placeholder="Your handle"
+                      placeholder="https://..."
                     />
                   </div>
-                  <div>
-                    <label className="profile-label">Status</label>
-                    <select
-                      className="profile-select"
-                      value={form.status}
-                      onChange={(e) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          status: e.target.value as
-                            | "online"
-                            | "offline"
-                            | "away"
-                            | "dnd",
-                        }))
-                      }
-                    >
-                      {STATUS_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
+                  <div style={{ marginTop: 12 }}>
+                    <label className="profile-label">Theme</label>
+                    <div className="theme-picker">
+                      {THEMES.map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          className={`theme-swatch ${activeTheme === t.id ? "active" : ""}`}
+                          onClick={() => { setTheme(t.id); setActiveTheme(t.id); }}
+                          title={t.label}
+                        >
+                          <div
+                            className="theme-swatch-preview"
+                            style={{ background: t.bg, borderColor: activeTheme === t.id ? t.accent : "transparent" }}
+                          >
+                            <div className="theme-swatch-accent" style={{ background: t.accent }} />
+                          </div>
+                          <span className="theme-swatch-label">{t.label}</span>
+                        </button>
                       ))}
-                    </select>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="profile-section">
-                <div className="profile-section-title">Appearance</div>
-                <div>
-                  <label className="profile-label">Avatar URL</label>
-                  <input
-                    className="profile-input"
-                    value={form.avatarUrl}
+                <div className="profile-section">
+                  <div className="profile-section-title">Voice & Video</div>
+                  <div className="profile-grid">
+                    <div>
+                      <label className="profile-label">Push-to-talk</label>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setForm((prev) => ({
+                            ...prev,
+                            pushToTalkEnabled: !prev.pushToTalkEnabled,
+                          }))
+                        }
+                        className={`ptt-toggle ${
+                          form.pushToTalkEnabled ? "active" : ""
+                        }`}
+                      >
+                        {form.pushToTalkEnabled ? "Enabled" : "Disabled"}
+                      </button>
+                    </div>
+                    <div>
+                      <label className="profile-label">PTT Key</label>
+                      <button
+                        type="button"
+                        onClick={() => setCapturingKey(true)}
+                        className="ptt-key"
+                      >
+                        {capturingKey
+                          ? "Press any key..."
+                          : formatKey(form.pushToTalkKey)}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="profile-grid profile-grid--three">
+                    <div>
+                      <label className="profile-label">Microphone</label>
+                      <select
+                        className="profile-select"
+                        value={form.audioInputId}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            audioInputId: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">System default</option>
+                        {audioInputs.map((device, index) => (
+                          <option key={device.deviceId} value={device.deviceId}>
+                            {labelDevice(device, index)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="profile-label">Speakers</label>
+                      <select
+                        className="profile-select"
+                        value={form.audioOutputId}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            audioOutputId: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">System default</option>
+                        {audioOutputs.map((device, index) => (
+                          <option key={device.deviceId} value={device.deviceId}>
+                            {labelDevice(device, index)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="profile-label">Camera</label>
+                      <select
+                        className="profile-select"
+                        value={form.videoInputId}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            videoInputId: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">System default</option>
+                        {videoInputs.map((device, index) => (
+                          <option key={device.deviceId} value={device.deviceId}>
+                            {labelDevice(device, index)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="profile-device-row">
+                    <button
+                      type="button"
+                      className="profile-button secondary"
+                      onClick={() => loadDevices(true)}
+                    >
+                      Refresh devices
+                    </button>
+                    {deviceError && (
+                      <span className="text-xs text-[var(--danger)]">
+                        {deviceError}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-[var(--text-muted)]" style={{ marginTop: 8 }}>
+                    Screen share quality is chosen when you start sharing.
+                  </p>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    Hold your PTT key to transmit when enabled.
+                  </p>
+                </div>
+
+                <div className="profile-section">
+                  <div className="profile-section-title">About</div>
+                  <textarea
+                    className="profile-textarea"
+                    value={form.about}
                     onChange={(e) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        avatarUrl: e.target.value,
-                      }))
+                      setForm((prev) => ({ ...prev, about: e.target.value }))
                     }
-                    placeholder="https://..."
+                    placeholder="A short bio or what you are working on"
                   />
                 </div>
-                <div style={{ marginTop: 12 }}>
-                  <label className="profile-label">Theme</label>
-                  <div className="theme-picker">
-                    {THEMES.map((t) => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        className={`theme-swatch ${activeTheme === t.id ? "active" : ""}`}
-                        onClick={() => { setTheme(t.id); setActiveTheme(t.id); }}
-                        title={t.label}
-                      >
-                        <div
-                          className="theme-swatch-preview"
-                          style={{ background: t.bg, borderColor: activeTheme === t.id ? t.accent : "transparent" }}
-                        >
-                          <div className="theme-swatch-accent" style={{ background: t.accent }} />
-                        </div>
-                        <span className="theme-swatch-label">{t.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
 
-              <div className="profile-section">
-                <div className="profile-section-title">Voice & Video</div>
-                <div className="profile-grid">
-                  <div>
-                    <label className="profile-label">Push-to-talk</label>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setForm((prev) => ({
-                          ...prev,
-                          pushToTalkEnabled: !prev.pushToTalkEnabled,
-                        }))
-                      }
-                      className={`ptt-toggle ${
-                        form.pushToTalkEnabled ? "active" : ""
-                      }`}
-                    >
-                      {form.pushToTalkEnabled ? "Enabled" : "Disabled"}
-                    </button>
-                  </div>
-                  <div>
-                    <label className="profile-label">PTT Key</label>
-                    <button
-                      type="button"
-                      onClick={() => setCapturingKey(true)}
-                      className="ptt-key"
-                    >
-                      {capturingKey
-                        ? "Press any key..."
-                        : formatKey(form.pushToTalkKey)}
-                    </button>
-                  </div>
-                </div>
-                <div className="profile-grid profile-grid--three">
-                  <div>
-                    <label className="profile-label">Microphone</label>
-                    <select
-                      className="profile-select"
-                      value={form.audioInputId}
-                      onChange={(e) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          audioInputId: e.target.value,
-                        }))
-                      }
-                    >
-                      <option value="">System default</option>
-                      {audioInputs.map((device, index) => (
-                        <option key={device.deviceId} value={device.deviceId}>
-                          {labelDevice(device, index)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="profile-label">Speakers</label>
-                    <select
-                      className="profile-select"
-                      value={form.audioOutputId}
-                      onChange={(e) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          audioOutputId: e.target.value,
-                        }))
-                      }
-                    >
-                      <option value="">System default</option>
-                      {audioOutputs.map((device, index) => (
-                        <option key={device.deviceId} value={device.deviceId}>
-                          {labelDevice(device, index)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="profile-label">Camera</label>
-                    <select
-                      className="profile-select"
-                      value={form.videoInputId}
-                      onChange={(e) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          videoInputId: e.target.value,
-                        }))
-                      }
-                    >
-                      <option value="">System default</option>
-                      {videoInputs.map((device, index) => (
-                        <option key={device.deviceId} value={device.deviceId}>
-                          {labelDevice(device, index)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="profile-device-row">
+                {error && (
+                  <div className="text-sm text-[var(--danger)]">{error}</div>
+                )}
+                {success && (
+                  <div className="text-sm text-[var(--success)]">{success}</div>
+                )}
+
+                <div className="profile-actions">
                   <button
                     type="button"
+                    onClick={handleReset}
                     className="profile-button secondary"
-                    onClick={() => loadDevices(true)}
                   >
-                    Refresh devices
+                    Reset
                   </button>
-                  {deviceError && (
-                    <span className="text-xs text-[var(--danger)]">
-                      {deviceError}
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="profile-button"
+                  >
+                    {saving ? "Saving..." : "Save changes"}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="profile-public-pane">
+                <div className="profile-section">
+                  <div className="profile-section-title">Public Profile</div>
+                  <div className="profile-public-name heading-font">
+                    {profile.username || "Anonymous"}
+                  </div>
+                  <div className="profile-card-row">
+                    <span
+                      className="profile-status-dot"
+                      style={{
+                        background: publicStatusStyle.color,
+                        boxShadow: `0 0 10px ${publicStatusStyle.glow}`,
+                      }}
+                    />
+                    <span className="text-xs text-[var(--text-muted)]">
+                      {STATUS_OPTIONS.find((s) => s.value === profile.status)?.label}
                     </span>
-                  )}
-                </div>
-                <div className="profile-grid" style={{ marginTop: 12 }}>
-                  <div>
-                    <label className="profile-label">Camera Resolution</label>
-                    <select
-                      className="profile-select"
-                      value={camRes}
-                      onChange={(e) => {
-                        setCamRes(e.target.value);
-                        setCameraResolution(e.target.value);
-                      }}
-                    >
-                      {CAMERA_RESOLUTIONS.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.label} ({r.width}x{r.height})
-                        </option>
-                      ))}
-                    </select>
                   </div>
-                  <div>
-                    <label className="profile-label">Camera FPS</label>
-                    <select
-                      className="profile-select"
-                      value={camFps}
-                      onChange={(e) => {
-                        const v = parseInt(e.target.value, 10);
-                        setCamFps(v);
-                        setCameraFps(v);
-                      }}
-                    >
-                      {CAMERA_FPS.map((fps) => (
-                        <option key={fps} value={fps}>
-                          {fps} fps
-                        </option>
-                      ))}
-                    </select>
+                  <div className="profile-public-about">
+                    {profile.about?.trim() || "No bio provided."}
                   </div>
                 </div>
-                <p className="text-xs text-[var(--text-muted)]" style={{ marginTop: 8 }}>
-                  Camera quality may be capped by server settings. Screen share quality is chosen when you start sharing.
-                </p>
-                <p className="text-xs text-[var(--text-muted)]">
-                  Hold your PTT key to transmit when enabled.
-                </p>
               </div>
-
-              <div className="profile-section">
-                <div className="profile-section-title">About</div>
-                <textarea
-                  className="profile-textarea"
-                  value={form.about}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, about: e.target.value }))
-                  }
-                  placeholder="A short bio or what you are working on"
-                />
-              </div>
-
-              {error && (
-                <div className="text-sm text-[var(--danger)]">{error}</div>
-              )}
-              {success && (
-                <div className="text-sm text-[var(--success)]">{success}</div>
-              )}
-
-              <div className="profile-actions">
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="profile-button secondary"
-                >
-                  Reset
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="profile-button"
-                >
-                  {saving ? "Saving..." : "Save changes"}
-                </button>
-              </div>
-            </form>
+            )}
           </div>
         </div>
   );

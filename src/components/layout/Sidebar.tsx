@@ -10,12 +10,17 @@ import {
   VideoOff,
   MonitorUp,
   PhoneOff,
+  MessageSquare,
+  Volume2,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { getResolutionsUpTo, getFpsUpTo } from "../../lib/livekit";
 import { getServerUrl } from "../../lib/api";
 
 interface SidebarProps {
   rooms: Room[];
+  dmRooms: Room[];
   activeRoom: Room | null;
   onSelectRoom: (room: Room) => void;
   onCreateRoom: (name: string, type: "text" | "voice") => void;
@@ -29,10 +34,13 @@ interface SidebarProps {
   onOpenSettings: () => void;
   onSignOut: () => void;
   voiceControls: VoiceControls | null;
+  unreadByRoom: Record<string, number>;
+  mentionByRoom: Record<string, number>;
 }
 
 export default function Sidebar({
   rooms,
+  dmRooms,
   activeRoom,
   onSelectRoom,
   onCreateRoom,
@@ -43,11 +51,18 @@ export default function Sidebar({
   onOpenSettings,
   onSignOut,
   voiceControls,
+  unreadByRoom,
+  mentionByRoom,
 }: SidebarProps) {
   const [newRoomName, setNewRoomName] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [createType, setCreateType] = useState<"text" | "voice">("text");
   const [showSharePicker, setShowSharePicker] = useState(false);
+  const [textCollapsed, setTextCollapsed] = useState(false);
+  const [voiceCollapsed, setVoiceCollapsed] = useState(false);
+  const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([]);
+  const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([]);
+  const [devicePickerError, setDevicePickerError] = useState<string | null>(null);
   const [shareRes, setShareRes] = useState("1080p");
   const [shareFps, setShareFps] = useState(30);
   const sharePickerRef = useRef<HTMLDivElement>(null);
@@ -129,6 +144,65 @@ export default function Sidebar({
     }
   }, [voiceControls?.isScreenSharing, voiceControls]);
 
+  // Load quick device picker options when voice controls are available
+  useEffect(() => {
+    if (!voiceControls) return;
+    let cancelled = false;
+
+    async function primeMediaPermissions() {
+      if (!navigator.mediaDevices?.getUserMedia) return;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: false,
+        });
+        stream.getTracks().forEach((track) => track.stop());
+      } catch {
+        // Keep going; we'll still show any devices that are available.
+      }
+    }
+
+    async function loadDevices() {
+      if (!navigator.mediaDevices?.enumerateDevices) return;
+      try {
+        let devices = await navigator.mediaDevices.enumerateDevices();
+        let audioIn = devices.filter((d) => d.kind === "audioinput");
+        let audioOut = devices.filter((d) => d.kind === "audiooutput");
+
+        if ((audioIn.length <= 1 || audioOut.length <= 1) && navigator.mediaDevices?.getUserMedia) {
+          await primeMediaPermissions();
+          devices = await navigator.mediaDevices.enumerateDevices();
+          audioIn = devices.filter((d) => d.kind === "audioinput");
+          audioOut = devices.filter((d) => d.kind === "audiooutput");
+        }
+
+        if (cancelled) return;
+        setAudioInputs(audioIn);
+        setAudioOutputs(audioOut);
+        if (audioIn.length <= 1 && audioOut.length <= 1) {
+          setDevicePickerError("Only default devices are currently available.");
+        } else {
+          setDevicePickerError(null);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setDevicePickerError(
+          err instanceof Error ? err.message : "Unable to load devices"
+        );
+      }
+    }
+
+    void loadDevices();
+    function onDeviceChange() {
+      void loadDevices();
+    }
+    navigator.mediaDevices?.addEventListener?.("devicechange", onDeviceChange);
+    return () => {
+      cancelled = true;
+      navigator.mediaDevices?.removeEventListener?.("devicechange", onDeviceChange);
+    };
+  }, [Boolean(voiceControls)]);
+
   const statusMap: Record<string, { label: string; color: string }> = {
     online: { label: "Online", color: "var(--success)" },
     away: { label: "Away", color: "#f59e0b" },
@@ -186,6 +260,36 @@ export default function Sidebar({
       onCreateRoom(newRoomName.trim(), createType);
       closeCreateModal();
     }
+  }
+
+  function formatBadgeCount(count: number) {
+    if (count > 99) return "99+";
+    return String(count);
+  }
+
+  function renderRoomBadges(roomId: string) {
+    const unread = unreadByRoom[roomId] ?? 0;
+    const mentions = mentionByRoom[roomId] ?? 0;
+    if (!unread && !mentions) return null;
+
+    return (
+      <span className="sidebar-channel-badges">
+        {mentions > 0 && (
+          <span className="sidebar-channel-badge mention">
+            @{formatBadgeCount(mentions)}
+          </span>
+        )}
+        {unread > 0 && (
+          <span className="sidebar-channel-badge">
+            {formatBadgeCount(unread)}
+          </span>
+        )}
+      </span>
+    );
+  }
+
+  function labelDevice(device: MediaDeviceInfo, index: number, prefix: string) {
+    return device.label || `${prefix} ${index + 1}`;
   }
 
   return (
@@ -279,77 +383,167 @@ export default function Sidebar({
 
       {/* Room lists */}
       <div className="sidebar-rooms">
+        {/* Direct Messages */}
+        {dmRooms.length > 0 && (
+          <>
+            <div className="sidebar-section-title heading-font">Direct Messages</div>
+            <AnimatePresence initial={false}>
+              {dmRooms.map((dm) => {
+                const displayName = dm.other_username || "Unknown User";
+                return (
+                  <motion.button
+                    key={dm.id}
+                    layout
+                    initial={{ opacity: 0, x: -20, height: 0 }}
+                    animate={{ opacity: 1, x: 0, height: "auto" }}
+                    exit={{ opacity: 0, x: -20, height: 0 }}
+                    transition={{ duration: 0.25, ease: "easeOut" }}
+                    onClick={() => onSelectRoom(dm)}
+                    className={`sidebar-channel ${activeRoom?.id === dm.id ? "active" : ""}`}
+                  >
+                    <span className="sidebar-channel-main">
+                      <span className="sidebar-dm-avatar">
+                        {dm.other_avatar_url ? (
+                          <img src={dm.other_avatar_url} alt="" />
+                        ) : (
+                          displayName.charAt(0).toUpperCase()
+                        )}
+                      </span>
+                      <span className="sidebar-channel-main-text">{displayName}</span>
+                    </span>
+                    {renderRoomBadges(dm.id)}
+                  </motion.button>
+                );
+              })}
+            </AnimatePresence>
+          </>
+        )}
+
         {/* Text channels */}
-        <div className="sidebar-section-title heading-font">Text Channels</div>
+        <button
+          className="sidebar-section-title heading-font sidebar-section-toggle"
+          onClick={() => setTextCollapsed((prev) => !prev)}
+        >
+          <span className="sidebar-section-toggle-label">Text Channels</span>
+          <span className="sidebar-section-toggle-icon" aria-hidden="true">
+            {textCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+          </span>
+        </button>
         <AnimatePresence initial={false}>
-        {textRooms.map((room) => (
-          <motion.button
-            key={room.id}
-            layout
-            initial={{ opacity: 0, x: -20, height: 0 }}
-            animate={{ opacity: 1, x: 0, height: "auto" }}
-            exit={{ opacity: 0, x: -20, height: 0 }}
-            transition={{ duration: 0.25, ease: "easeOut" }}
-            onClick={() => onSelectRoom(room)}
-            className={`sidebar-channel ${
-              activeRoom?.id === room.id ? "active" : ""
-            }`}
-          >
-            # {room.name}
-          </motion.button>
-        ))}
+          {!textCollapsed && (
+            <motion.div
+              key="text-rooms"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              style={{ overflow: "hidden" }}
+            >
+              {textRooms.map((room) => (
+                <motion.button
+                  key={room.id}
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.16, ease: "easeOut" }}
+                  onClick={() => onSelectRoom(room)}
+                  className={`sidebar-channel ${
+                    activeRoom?.id === room.id ? "active" : ""
+                  }`}
+                >
+                  <span className="sidebar-channel-main">
+                    <span className="sidebar-channel-icon" aria-hidden="true">
+                      <MessageSquare size={14} />
+                    </span>
+                    <span className="sidebar-channel-main-text">{room.name}</span>
+                  </span>
+                  {renderRoomBadges(room.id)}
+                </motion.button>
+              ))}
+            </motion.div>
+          )}
         </AnimatePresence>
 
         {/* Voice channels */}
-        <div className="sidebar-section-title heading-font">Voice Channels</div>
+        <button
+          className="sidebar-section-title heading-font sidebar-section-toggle"
+          onClick={() => setVoiceCollapsed((prev) => !prev)}
+        >
+          <span className="sidebar-section-toggle-label">Voice Channels</span>
+          <span className="sidebar-section-toggle-icon" aria-hidden="true">
+            {voiceCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+          </span>
+        </button>
         <AnimatePresence initial={false}>
-        {voiceRooms.map((room) => (
-          <motion.div
-            key={room.id}
-            layout
-            initial={{ opacity: 0, x: -20, height: 0 }}
-            animate={{ opacity: 1, x: 0, height: "auto" }}
-            exit={{ opacity: 0, x: -20, height: 0 }}
-            transition={{ duration: 0.25, ease: "easeOut" }}
-          >
-            <button
-              onClick={() => onSelectRoom(room)}
-              className={`sidebar-channel ${
-                activeRoom?.id === room.id ? "active" : ""
-              }`}
+          {!voiceCollapsed && (
+            <motion.div
+              key="voice-rooms"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              style={{ overflow: "hidden" }}
             >
-              [V] {room.name}
-            </button>
-            {(voiceParticipants[room.id]?.length || leavingParticipants[room.id]?.length) ? (
-              <div className="sidebar-voice-participants">
-                {voiceParticipants[room.id]?.map((participant) => (
-                  <div
-                    key={`${room.id}-${participant.id}`}
-                    className={`sidebar-voice-participant ${
-                      participant.isSpeaking ? "speaking" : ""
+              {voiceRooms.map((room) => (
+                <motion.div
+                  key={room.id}
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.16, ease: "easeOut" }}
+                >
+                  <button
+                    onClick={() => onSelectRoom(room)}
+                    className={`sidebar-channel ${
+                      activeRoom?.id === room.id ? "active" : ""
                     }`}
                   >
-                    <span className="sidebar-voice-dot" />
-                    <span className="sidebar-voice-name">
-                      {participant.name}
+                    <span className="sidebar-channel-main">
+                      <span className="sidebar-channel-icon" aria-hidden="true">
+                        <Volume2 size={14} />
+                      </span>
+                      <span className="sidebar-channel-main-text">{room.name}</span>
+                      <span className="sidebar-voice-count">
+                        {voiceParticipants[room.id]?.length ?? 0}
+                      </span>
                     </span>
-                  </div>
-                ))}
-                {leavingParticipants[room.id]?.map((participant) => (
-                  <div
-                    key={`${room.id}-${participant.id}-leaving`}
-                    className="sidebar-voice-participant leaving"
-                  >
-                    <span className="sidebar-voice-dot" />
-                    <span className="sidebar-voice-name">
-                      {participant.name}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </motion.div>
-        ))}
+                    {renderRoomBadges(room.id)}
+                  </button>
+                  {(voiceParticipants[room.id]?.length || leavingParticipants[room.id]?.length) ? (
+                    <div className="sidebar-voice-participants">
+                      {voiceParticipants[room.id]?.map((participant) => (
+                        <div
+                          key={`${room.id}-${participant.id}`}
+                          className={`sidebar-voice-participant ${
+                            participant.isSpeaking ? "speaking" : ""
+                          }`}
+                        >
+                          <span className="sidebar-voice-dot" />
+                          <span className="sidebar-voice-name">
+                            {participant.name}
+                          </span>
+                          {participant.isSpeaking && (
+                            <Mic size={12} className="sidebar-voice-speaking-icon" />
+                          )}
+                        </div>
+                      ))}
+                      {leavingParticipants[room.id]?.map((participant) => (
+                        <div
+                          key={`${room.id}-${participant.id}-leaving`}
+                          className="sidebar-voice-participant leaving"
+                        >
+                          <span className="sidebar-voice-dot" />
+                          <span className="sidebar-voice-name">
+                            {participant.name}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </motion.div>
+              ))}
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
 
@@ -438,6 +632,59 @@ export default function Sidebar({
               )}
             </div>
           </div>
+          <div className="sidebar-device-pickers">
+            <select
+              className="sidebar-device-select"
+              title="Microphone"
+              value={voiceControls.audioInputDeviceId}
+              onChange={async (e) => {
+                try {
+                  await voiceControls.setAudioInputDevice(e.target.value);
+                  setDevicePickerError(null);
+                } catch (err) {
+                  setDevicePickerError(
+                    err instanceof Error
+                      ? err.message
+                      : "Unable to switch microphone device"
+                  );
+                }
+              }}
+            >
+              <option value="">Mic: System default</option>
+              {audioInputs.map((device, index) => (
+                <option key={device.deviceId} value={device.deviceId}>
+                  {labelDevice(device, index, "Microphone")}
+                </option>
+              ))}
+            </select>
+            <select
+              className="sidebar-device-select"
+              title="Speakers"
+              value={voiceControls.audioOutputDeviceId}
+              onChange={async (e) => {
+                try {
+                  await voiceControls.setAudioOutputDevice(e.target.value);
+                  setDevicePickerError(null);
+                } catch (err) {
+                  setDevicePickerError(
+                    err instanceof Error
+                      ? err.message
+                      : "Unable to switch speaker device"
+                  );
+                }
+              }}
+            >
+              <option value="">Output: System default</option>
+              {audioOutputs.map((device, index) => (
+                <option key={device.deviceId} value={device.deviceId}>
+                  {labelDevice(device, index, "Output")}
+                </option>
+              ))}
+            </select>
+          </div>
+          {devicePickerError && (
+            <div className="sidebar-device-error">{devicePickerError}</div>
+          )}
           <button
             onClick={voiceControls.disconnect}
             className="sidebar-vc-btn danger"

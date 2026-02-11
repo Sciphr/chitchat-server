@@ -41,8 +41,6 @@ router.post("/token", async (req, res) => {
   res.json({
     token,
     mediaLimits: {
-      maxVideoResolution: config.livekit.maxVideoResolution,
-      maxVideoFps: config.livekit.maxVideoFps,
       maxScreenShareResolution: config.livekit.maxScreenShareResolution,
       maxScreenShareFps: config.livekit.maxScreenShareFps,
     },

@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS rooms (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('text', 'voice')),
+  type TEXT NOT NULL CHECK (type IN ('text', 'voice', 'dm')),
   created_by TEXT DEFAULT 'system',
   created_at TEXT DEFAULT (datetime('now'))
 );
@@ -53,6 +53,25 @@ CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_friends_user_id ON friends(user_id);
 CREATE INDEX IF NOT EXISTS idx_friends_friend_id ON friends(friend_id);
 `;
+
+/** Migrations for existing databases. Each runs once, tracked by _migrations table. */
+export const MIGRATIONS: Array<{ name: string; sql: string }> = [
+  {
+    name: "001_allow_dm_room_type",
+    sql: `
+      CREATE TABLE IF NOT EXISTS rooms_new (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('text', 'voice', 'dm')),
+        created_by TEXT DEFAULT 'system',
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+      INSERT OR IGNORE INTO rooms_new SELECT * FROM rooms;
+      DROP TABLE rooms;
+      ALTER TABLE rooms_new RENAME TO rooms;
+    `,
+  },
+];
 
 import { getConfig } from "../config.js";
 
