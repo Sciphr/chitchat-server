@@ -12,8 +12,9 @@
   "dependencies": {
     "@livekit/components-react": "latest",
     "@livekit/components-styles": "latest",
-"@tauri-apps/api": "^2",
+    "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
+    "framer-motion": "^12.34.0",
     "livekit-client": "latest",
     "lucide-react": "^0.563.0",
     "react": "^19.1.0",

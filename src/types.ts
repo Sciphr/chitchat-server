@@ -22,7 +22,16 @@ export interface VoiceControls {
   toggleDeafen: () => void;
   toggleVideo: () => void;
   toggleScreenShare: () => void;
+  /** Start screen share with specific quality options */
+  startScreenShare: (resolution: string, fps: number) => void;
+  /** Stop screen share */
+  stopScreenShare: () => void;
   disconnect: () => void;
+  /** Server-imposed media limits */
+  mediaLimits: {
+    maxScreenShareResolution: string;
+    maxScreenShareFps: number;
+  };
 }
 
 export interface Message {

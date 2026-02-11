@@ -117,6 +117,7 @@ export default function Home() {
               currentUserId={user?.id ?? null}
               currentUsername={profile.username}
               currentAvatarUrl={profile.avatarUrl}
+              isAdmin={user?.isAdmin ?? false}
             />
           ) : (
             <VoiceChannel

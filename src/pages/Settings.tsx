@@ -1,5 +1,46 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../hooks/useAuth";
+import { VIDEO_RESOLUTIONS, FPS_OPTIONS } from "../lib/livekit";
+
+const THEMES = [
+  { id: "midnight", label: "Midnight", accent: "#7c6aff", bg: "#0f0f17" },
+  { id: "ember",    label: "Ember",    accent: "#f97316", bg: "#1a0f0b" },
+  { id: "ocean",    label: "Ocean",    accent: "#06b6d4", bg: "#0b1420" },
+  { id: "forest",   label: "Forest",   accent: "#22c55e", bg: "#0b150e" },
+  { id: "rose",     label: "Rose",     accent: "#ec4899", bg: "#160b14" },
+  { id: "slate",    label: "Slate",    accent: "#8b8cf8", bg: "#121418" },
+  { id: "sunset",   label: "Sunset",   accent: "#f59e0b", bg: "#181008" },
+  { id: "arctic",   label: "Arctic",   accent: "#3b82f6", bg: "#f0f4f8" },
+] as const;
+
+function getTheme(): string {
+  return localStorage.getItem("chitchat-theme") || "midnight";
+}
+
+function setTheme(id: string) {
+  localStorage.setItem("chitchat-theme", id);
+  document.documentElement.dataset.theme = id;
+}
+
+// Camera quality localStorage helpers (up to 1080p for camera presets)
+const CAMERA_RESOLUTIONS = VIDEO_RESOLUTIONS.filter(
+  (r) => r.id !== "4k", // 4K is screen-share only
+);
+const CAMERA_FPS = FPS_OPTIONS.filter((f) => f >= 15); // 5fps doesn't make sense for camera
+
+function getCameraResolution(): string {
+  return localStorage.getItem("chitchat-camera-resolution") || "720p";
+}
+function setCameraResolution(v: string) {
+  localStorage.setItem("chitchat-camera-resolution", v);
+}
+function getCameraFps(): number {
+  const v = localStorage.getItem("chitchat-camera-fps");
+  return v ? parseInt(v, 10) : 30;
+}
+function setCameraFps(v: number) {
+  localStorage.setItem("chitchat-camera-fps", String(v));
+}
 
 const STATUS_OPTIONS = [
   { value: "online", label: "Online" },
@@ -41,10 +82,13 @@ export default function Settings({ onClose }: SettingsProps) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [capturingKey, setCapturingKey] = useState(false);
+  const [activeTheme, setActiveTheme] = useState(getTheme);
   const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([]);
   const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([]);
   const [videoInputs, setVideoInputs] = useState<MediaDeviceInfo[]>([]);
   const [deviceError, setDeviceError] = useState<string | null>(null);
+  const [camRes, setCamRes] = useState(getCameraResolution);
+  const [camFps, setCamFps] = useState(getCameraFps);
   const statusStyle =
     STATUS_STYLES[form.status] || STATUS_STYLES.online;
 
@@ -344,6 +388,28 @@ export default function Settings({ onClose }: SettingsProps) {
                     placeholder="https://..."
                   />
                 </div>
+                <div style={{ marginTop: 12 }}>
+                  <label className="profile-label">Theme</label>
+                  <div className="theme-picker">
+                    {THEMES.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        className={`theme-swatch ${activeTheme === t.id ? "active" : ""}`}
+                        onClick={() => { setTheme(t.id); setActiveTheme(t.id); }}
+                        title={t.label}
+                      >
+                        <div
+                          className="theme-swatch-preview"
+                          style={{ background: t.bg, borderColor: activeTheme === t.id ? t.accent : "transparent" }}
+                        >
+                          <div className="theme-swatch-accent" style={{ background: t.accent }} />
+                        </div>
+                        <span className="theme-swatch-label">{t.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               <div className="profile-section">
@@ -455,6 +521,46 @@ export default function Settings({ onClose }: SettingsProps) {
                     </span>
                   )}
                 </div>
+                <div className="profile-grid" style={{ marginTop: 12 }}>
+                  <div>
+                    <label className="profile-label">Camera Resolution</label>
+                    <select
+                      className="profile-select"
+                      value={camRes}
+                      onChange={(e) => {
+                        setCamRes(e.target.value);
+                        setCameraResolution(e.target.value);
+                      }}
+                    >
+                      {CAMERA_RESOLUTIONS.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.label} ({r.width}x{r.height})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="profile-label">Camera FPS</label>
+                    <select
+                      className="profile-select"
+                      value={camFps}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10);
+                        setCamFps(v);
+                        setCameraFps(v);
+                      }}
+                    >
+                      {CAMERA_FPS.map((fps) => (
+                        <option key={fps} value={fps}>
+                          {fps} fps
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <p className="text-xs text-[var(--text-muted)]" style={{ marginTop: 8 }}>
+                  Camera quality may be capped by server settings. Screen share quality is chosen when you start sharing.
+                </p>
                 <p className="text-xs text-[var(--text-muted)]">
                   Hold your PTT key to transmit when enabled.
                 </p>
