@@ -35,6 +35,9 @@ const io = new Server(httpServer, {
 app.use(cors());
 app.use(express.json());
 
+// Share Socket.IO with REST routes so they can broadcast events
+app.set("io", io);
+
 // REST routes
 app.use("/api/auth", authRoutes);
 app.use("/api/rooms", roomsRoutes);
@@ -42,7 +45,8 @@ app.use("/api/livekit", livekitRoutes);
 app.use("/api/server", serverInfoRoutes);
 app.use("/api/admin", adminRoutes);
 
-// Standalone admin page (served from server/admin/index.html)
+// Standalone admin panel (served from server/admin/)
+app.use("/admin", express.static(path.join(process.cwd(), "admin")));
 app.get("/admin", (_req, res) => {
   res.sendFile(path.join(process.cwd(), "admin", "index.html"));
 });
