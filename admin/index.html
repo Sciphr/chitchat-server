@@ -430,6 +430,14 @@
           <input type="text" id="cfg-serverName">
         </div>
         <div class="field">
+          <label for="cfg-serverDescription">Server Description</label>
+          <input type="text" id="cfg-serverDescription" placeholder="A short description shown on the login screen">
+        </div>
+        <div class="field">
+          <label for="cfg-motd">Message of the Day</label>
+          <textarea id="cfg-motd" placeholder="Shown as a system message when users join a room" rows="2"></textarea>
+        </div>
+        <div class="field">
           <label for="cfg-port">Port</label>
           <input type="number" id="cfg-port" min="1" max="65535">
           <div class="field-hint">Requires restart</div>
@@ -453,6 +461,10 @@
         <div class="field">
           <label for="cfg-messageRetentionDays">Message Retention (days, 0 = forever)</label>
           <input type="number" id="cfg-messageRetentionDays" min="0">
+        </div>
+        <div class="field">
+          <label for="cfg-rateLimitPerMinute">Rate Limit (messages/min, 0 = unlimited)</label>
+          <input type="number" id="cfg-rateLimitPerMinute" min="0">
         </div>
       </div>
 
@@ -499,7 +511,58 @@
       </div>
 
       <div class="card">
+        <h3>Media (LiveKit)</h3>
+        <div class="field">
+          <label for="cfg-lk-maxVideoRes">Max Camera Resolution</label>
+          <select id="cfg-lk-maxVideoRes">
+            <option value="360p">360p (640×360)</option>
+            <option value="480p">480p (854×480)</option>
+            <option value="720p">720p (1280×720)</option>
+            <option value="1080p">1080p (1920×1080)</option>
+            <option value="1440p">1440p (2560×1440)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="cfg-lk-maxVideoFps">Max Camera FPS</label>
+          <select id="cfg-lk-maxVideoFps">
+            <option value="15">15 fps</option>
+            <option value="24">24 fps</option>
+            <option value="30">30 fps</option>
+            <option value="60">60 fps</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="cfg-lk-maxScreenRes">Max Screen Share Resolution</label>
+          <select id="cfg-lk-maxScreenRes">
+            <option value="720p">720p (1280×720)</option>
+            <option value="1080p">1080p (1920×1080)</option>
+            <option value="1440p">1440p (2560×1440)</option>
+            <option value="4k">4K (3840×2160)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="cfg-lk-maxScreenFps">Max Screen Share FPS</label>
+          <select id="cfg-lk-maxScreenFps">
+            <option value="5">5 fps</option>
+            <option value="15">15 fps</option>
+            <option value="24">24 fps</option>
+            <option value="30">30 fps</option>
+            <option value="60">60 fps</option>
+          </select>
+          <div class="field-hint">Lower FPS uses less bandwidth. 5-15 fps is fine for static content.</div>
+        </div>
+      </div>
+
+      <div class="card">
         <h3>Security</h3>
+        <div class="inline-field">
+          <label>Maintenance Mode</label>
+          <label class="toggle">
+            <input type="checkbox" id="cfg-maintenanceMode">
+            <span class="toggle-slider"></span>
+          </label>
+          <div class="field-hint" style="margin-left:0;margin-top:4px">Only admins can log in when enabled</div>
+        </div>
         <div class="field">
           <label for="cfg-jwtExpiryDays">JWT Token Expiry (days)</label>
           <input type="number" id="cfg-jwtExpiryDays" min="1" max="365">
@@ -714,12 +777,16 @@
       $('#restart-banner').classList.add('hidden');
 
       $('#cfg-serverName').value = currentConfig.serverName;
+      $('#cfg-serverDescription').value = currentConfig.serverDescription || '';
+      $('#cfg-motd').value = currentConfig.motd || '';
       $('#cfg-port').value = currentConfig.port;
       $('#cfg-maxUsers').value = currentConfig.maxUsers;
       $('#cfg-maxMessageLength').value = currentConfig.maxMessageLength;
       $('#cfg-messageHistoryLimit').value = currentConfig.messageHistoryLimit;
       $('#cfg-messageRetentionDays').value = currentConfig.messageRetentionDays;
+      $('#cfg-rateLimitPerMinute').value = currentConfig.rateLimitPerMinute || 0;
       $('#cfg-jwtExpiryDays').value = currentConfig.jwtExpiryDays;
+      $('#cfg-maintenanceMode').checked = currentConfig.maintenanceMode || false;
 
       $('#cfg-reg-open').checked = currentConfig.registration.open;
       $('#cfg-reg-inviteOnly').checked = currentConfig.registration.inviteOnly;
@@ -728,6 +795,15 @@
       $('#cfg-reg-emailBlocklist').value = currentConfig.registration.emailBlocklist.join('\n');
 
       $('#cfg-rooms-userCanCreate').checked = currentConfig.rooms.userCanCreate;
+
+      // LiveKit media limits
+      if (currentConfig.livekit) {
+        $('#cfg-lk-maxVideoRes').value = currentConfig.livekit.maxVideoResolution || '720p';
+        $('#cfg-lk-maxVideoFps').value = String(currentConfig.livekit.maxVideoFps || 30);
+        $('#cfg-lk-maxScreenRes').value = currentConfig.livekit.maxScreenShareResolution || '1080p';
+        $('#cfg-lk-maxScreenFps').value = String(currentConfig.livekit.maxScreenShareFps || 30);
+      }
+
       $('#cfg-adminEmails').value = currentConfig.adminEmails.join('\n');
     } catch (err) {
       toast(err.message, 'error');
@@ -737,12 +813,16 @@
   async function saveConfig() {
     const partial = {
       serverName: $('#cfg-serverName').value.trim(),
+      serverDescription: $('#cfg-serverDescription').value.trim(),
+      motd: $('#cfg-motd').value.trim(),
       port: parseInt($('#cfg-port').value, 10),
       maxUsers: parseInt($('#cfg-maxUsers').value, 10),
       maxMessageLength: parseInt($('#cfg-maxMessageLength').value, 10),
       messageHistoryLimit: parseInt($('#cfg-messageHistoryLimit').value, 10),
       messageRetentionDays: parseInt($('#cfg-messageRetentionDays').value, 10),
+      rateLimitPerMinute: parseInt($('#cfg-rateLimitPerMinute').value, 10) || 0,
       jwtExpiryDays: parseInt($('#cfg-jwtExpiryDays').value, 10),
+      maintenanceMode: $('#cfg-maintenanceMode').checked,
       registration: {
         open: $('#cfg-reg-open').checked,
         inviteOnly: $('#cfg-reg-inviteOnly').checked,
@@ -755,6 +835,12 @@
         defaults: currentConfig.rooms.defaults,
       },
       adminEmails: parseLines($('#cfg-adminEmails').value),
+      livekit: {
+        maxVideoResolution: $('#cfg-lk-maxVideoRes').value,
+        maxVideoFps: parseInt($('#cfg-lk-maxVideoFps').value, 10),
+        maxScreenShareResolution: $('#cfg-lk-maxScreenRes').value,
+        maxScreenShareFps: parseInt($('#cfg-lk-maxScreenFps').value, 10),
+      },
     };
 
     try {

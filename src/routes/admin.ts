@@ -60,12 +60,65 @@ router.put("/config", requireAuth, requireAdmin, (req, res) => {
     res.status(400).json({ error: "serverName must be a string" });
     return;
   }
+  if (partial.serverDescription !== undefined && typeof partial.serverDescription !== "string") {
+    res.status(400).json({ error: "serverDescription must be a string" });
+    return;
+  }
+  if (partial.motd !== undefined && typeof partial.motd !== "string") {
+    res.status(400).json({ error: "motd must be a string" });
+    return;
+  }
+  if (
+    partial.rateLimitPerMinute !== undefined &&
+    (typeof partial.rateLimitPerMinute !== "number" || partial.rateLimitPerMinute < 0)
+  ) {
+    res.status(400).json({ error: "rateLimitPerMinute must be a non-negative number" });
+    return;
+  }
+  if (partial.maintenanceMode !== undefined && typeof partial.maintenanceMode !== "boolean") {
+    res.status(400).json({ error: "maintenanceMode must be a boolean" });
+    return;
+  }
   if (
     partial.jwtExpiryDays !== undefined &&
     (typeof partial.jwtExpiryDays !== "number" || partial.jwtExpiryDays < 1 || partial.jwtExpiryDays > 365)
   ) {
     res.status(400).json({ error: "jwtExpiryDays must be between 1 and 365" });
     return;
+  }
+
+  // Validate LiveKit media limits
+  if (partial.livekit) {
+    const validVideoRes = ["360p", "480p", "720p", "1080p", "1440p"];
+    const validScreenRes = ["720p", "1080p", "1440p", "4k"];
+    if (
+      partial.livekit.maxVideoResolution !== undefined &&
+      !validVideoRes.includes(partial.livekit.maxVideoResolution)
+    ) {
+      res.status(400).json({ error: `maxVideoResolution must be one of: ${validVideoRes.join(", ")}` });
+      return;
+    }
+    if (
+      partial.livekit.maxVideoFps !== undefined &&
+      (typeof partial.livekit.maxVideoFps !== "number" || ![15, 24, 30, 60].includes(partial.livekit.maxVideoFps))
+    ) {
+      res.status(400).json({ error: "maxVideoFps must be one of: 15, 24, 30, 60" });
+      return;
+    }
+    if (
+      partial.livekit.maxScreenShareResolution !== undefined &&
+      !validScreenRes.includes(partial.livekit.maxScreenShareResolution)
+    ) {
+      res.status(400).json({ error: `maxScreenShareResolution must be one of: ${validScreenRes.join(", ")}` });
+      return;
+    }
+    if (
+      partial.livekit.maxScreenShareFps !== undefined &&
+      (typeof partial.livekit.maxScreenShareFps !== "number" || ![5, 15, 24, 30, 60].includes(partial.livekit.maxScreenShareFps))
+    ) {
+      res.status(400).json({ error: "maxScreenShareFps must be one of: 5, 15, 24, 30, 60" });
+      return;
+    }
   }
 
   try {

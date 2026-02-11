@@ -38,7 +38,15 @@ router.post("/token", async (req, res) => {
   });
 
   const token = await at.toJwt();
-  res.json({ token });
+  res.json({
+    token,
+    mediaLimits: {
+      maxVideoResolution: config.livekit.maxVideoResolution,
+      maxVideoFps: config.livekit.maxVideoFps,
+      maxScreenShareResolution: config.livekit.maxScreenShareResolution,
+      maxScreenShareFps: config.livekit.maxScreenShareFps,
+    },
+  });
 });
 
 export default router;

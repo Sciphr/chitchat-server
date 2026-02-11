@@ -1,5 +1,7 @@
 {
   "serverName": "My ChitChat Server",
+  "serverDescription": "",
+  "motd": "",
   "port": 3001,
   "jwtSecret": "change-me-in-production",
   "jwtExpiryDays": 7,
@@ -8,6 +10,8 @@
   "messageHistoryLimit": 50,
   "maxMessageLength": 2000,
   "messageRetentionDays": 0,
+  "rateLimitPerMinute": 0,
+  "maintenanceMode": false,
   "registration": {
     "open": true,
     "inviteOnly": false,
@@ -40,6 +44,10 @@
   ],
   "livekit": {
     "apiKey": "devkey",
-    "apiSecret": "secret"
+    "apiSecret": "secret",
+    "maxVideoResolution": "1080p",
+    "maxVideoFps": 60,
+    "maxScreenShareResolution": "4k",
+    "maxScreenShareFps": 60
   }
 }

@@ -13,6 +13,9 @@ interface ConnectedUser {
 
 const connectedUsers = new Map<string, ConnectedUser>();
 
+// Rate limiting: track message timestamps per socket
+const rateLimitBuckets = new Map<string, number[]>();
+
 export function setupSocketHandlers(io: Server) {
   // Authenticate socket connections via JWT
   io.use((socket, next) => {
@@ -126,6 +129,11 @@ export function setupSocketHandlers(io: Server) {
 
       const hasMore = messages.length >= config.messageHistoryLimit;
       socket.emit("message:history", { messages, hasMore });
+
+      // Send MOTD as a system message if configured
+      if (config.motd) {
+        socket.emit("message:system", { content: config.motd });
+      }
     });
 
     // Load older messages before a given timestamp
@@ -177,6 +185,22 @@ export function setupSocketHandlers(io: Server) {
         }) => void
       ) => {
         const config = getConfig();
+
+        // Rate limiting
+        if (config.rateLimitPerMinute > 0) {
+          const now = Date.now();
+          const windowStart = now - 60_000;
+          let bucket = rateLimitBuckets.get(socket.id) ?? [];
+          bucket = bucket.filter((ts) => ts > windowStart);
+          if (bucket.length >= config.rateLimitPerMinute) {
+            if (ack) {
+              ack({ ok: false, error: "You're sending messages too fast. Slow down!", client_nonce });
+            }
+            return;
+          }
+          bucket.push(now);
+          rateLimitBuckets.set(socket.id, bucket);
+        }
 
         if (content.length > config.maxMessageLength) {
           if (ack) {
@@ -265,6 +289,7 @@ export function setupSocketHandlers(io: Server) {
         );
       }
       connectedUsers.delete(socket.id);
+      rateLimitBuckets.delete(socket.id);
     });
   });
 }

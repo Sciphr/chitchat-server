@@ -124,10 +124,16 @@ router.post("/login", (req, res) => {
     return;
   }
 
+  const isAdmin = config.adminEmails.includes(user.email);
+
+  // Maintenance mode — only admins can log in
+  if (config.maintenanceMode && !isAdmin) {
+    res.status(503).json({ error: "Server is in maintenance mode. Please try again later." });
+    return;
+  }
+
   // Set user online on login
   db.prepare("UPDATE users SET status = 'online' WHERE id = ?").run(user.id);
-
-  const isAdmin = config.adminEmails.includes(user.email);
 
   const token = generateToken({
     userId: user.id,
