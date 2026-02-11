@@ -53,6 +53,61 @@ function clearPendingOffline(userId: string) {
   }
 }
 
+type MessageRow = {
+  id: string;
+  room_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+  username?: string;
+  avatar_url?: string | null;
+  client_nonce?: string;
+};
+
+type AttachmentRow = {
+  id: string;
+  original_name: string;
+  mime_type: string;
+  size_bytes: number;
+  created_at: string;
+  message_id: string;
+};
+
+function withAttachments(db: ReturnType<typeof getDb>, rows: MessageRow[]) {
+  if (!rows.length) return rows;
+
+  const byMessageId = new Map<string, Array<Record<string, unknown>>>();
+  const placeholders = rows.map(() => "?").join(", ");
+  const attachments = db
+    .prepare(
+      `SELECT ma.message_id, a.id, a.original_name, a.mime_type, a.size_bytes, a.created_at
+       FROM message_attachments ma
+       JOIN attachments a ON a.id = ma.attachment_id
+       WHERE ma.message_id IN (${placeholders})
+       ORDER BY a.created_at ASC`
+    )
+    .all(...rows.map((row) => row.id)) as AttachmentRow[];
+
+  for (const att of attachments) {
+    if (!byMessageId.has(att.message_id)) {
+      byMessageId.set(att.message_id, []);
+    }
+    byMessageId.get(att.message_id)!.push({
+      id: att.id,
+      original_name: att.original_name,
+      mime_type: att.mime_type,
+      size_bytes: att.size_bytes,
+      created_at: att.created_at,
+      url: `/api/files/${att.id}`,
+    });
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    attachments: byMessageId.get(row.id) ?? [],
+  }));
+}
+
 export function setupSocketHandlers(io: Server) {
   // Authenticate socket connections via JWT
   io.use((socket, next) => {
@@ -184,10 +239,12 @@ export function setupSocketHandlers(io: Server) {
              LIMIT ?
            ) sub ORDER BY sub.created_at ASC`
         )
-        .all(roomId, config.messageHistoryLimit);
+        .all(roomId, config.messageHistoryLimit) as MessageRow[];
+
+      const messagesWithAttachments = withAttachments(db, messages);
 
       const hasMore = messages.length >= config.messageHistoryLimit;
-      socket.emit("message:history", { messages, hasMore });
+      socket.emit("message:history", { messages: messagesWithAttachments, hasMore });
 
       // Send MOTD as a system message if configured (only for non-DM rooms)
       const room = db
@@ -227,7 +284,11 @@ export function setupSocketHandlers(io: Server) {
         >[];
 
         const hasMore = messages.length >= config.messageHistoryLimit;
-        if (ack) ack({ messages, hasMore });
+        const messagesWithAttachments = withAttachments(
+          db,
+          messages as MessageRow[]
+        );
+        if (ack) ack({ messages: messagesWithAttachments, hasMore });
       }
     );
 
@@ -264,7 +325,13 @@ export function setupSocketHandlers(io: Server) {
           room_id,
           content,
           client_nonce,
-        }: { room_id: string; content: string; client_nonce?: string },
+          attachment_ids,
+        }: {
+          room_id: string;
+          content: string;
+          client_nonce?: string;
+          attachment_ids?: string[];
+        },
         ack?: (payload: {
           ok: boolean;
           error?: string;
@@ -294,7 +361,23 @@ export function setupSocketHandlers(io: Server) {
           rateLimitBuckets.set(socket.id, bucket);
         }
 
-        if (content.length > config.maxMessageLength) {
+        const trimmed = (content || "").trim();
+        const attachmentIds = Array.isArray(attachment_ids)
+          ? attachment_ids.filter((id) => typeof id === "string" && id.length > 0)
+          : [];
+
+        if (!trimmed && attachmentIds.length === 0) {
+          if (ack) {
+            ack({
+              ok: false,
+              error: "Message or attachment is required",
+              client_nonce,
+            });
+          }
+          return;
+        }
+
+        if (trimmed.length > config.maxMessageLength) {
           if (ack) {
             ack({
               ok: false,
@@ -313,7 +396,25 @@ export function setupSocketHandlers(io: Server) {
         try {
           db.prepare(
             "INSERT INTO messages (id, room_id, user_id, content, created_at) VALUES (?, ?, ?, ?, ?)"
-          ).run(id, room_id, userId, content, created_at);
+          ).run(id, room_id, userId, trimmed, created_at);
+
+          if (attachmentIds.length > 0) {
+            const placeholders = attachmentIds.map(() => "?").join(", ");
+            const ownedAttachments = db
+              .prepare(
+                `SELECT id
+                 FROM attachments
+                 WHERE uploaded_by = ? AND id IN (${placeholders})`
+              )
+              .all(userId, ...attachmentIds) as Array<{ id: string }>;
+            const ownedSet = new Set(ownedAttachments.map((row) => row.id));
+            for (const attachmentId of attachmentIds) {
+              if (!ownedSet.has(attachmentId)) continue;
+              db.prepare(
+                "INSERT OR IGNORE INTO message_attachments (message_id, attachment_id) VALUES (?, ?)"
+              ).run(id, attachmentId);
+            }
+          }
 
           const profile = db
             .prepare("SELECT username, avatar_url FROM users WHERE id = ?")
@@ -325,14 +426,18 @@ export function setupSocketHandlers(io: Server) {
             id,
             room_id,
             user_id: userId,
-            content,
+            content: trimmed,
             created_at,
             username: profile?.username || user?.username || "Anonymous",
             avatar_url: profile?.avatar_url || user?.avatarUrl,
             client_nonce,
           };
 
-          io.to(room_id).emit("message:new", payload);
+          const payloadWithAttachments = withAttachments(db, [
+            payload as MessageRow,
+          ])[0] as Record<string, unknown>;
+
+          io.to(room_id).emit("message:new", payloadWithAttachments);
 
           // Room metadata (used for direct DM delivery and unread notifications)
           const roomInfo = db
@@ -351,14 +456,14 @@ export function setupSocketHandlers(io: Server) {
             if (otherMember) {
               for (const [sid, cu] of connectedUsers.entries()) {
                 if (cu.userId === otherMember.user_id) {
-                  io.to(sid).emit("message:notify", payload);
+                  io.to(sid).emit("message:notify", payloadWithAttachments);
                 }
               }
             }
           } else {
             for (const [sid, cu] of connectedUsers.entries()) {
               if (cu.userId !== userId) {
-                io.to(sid).emit("message:notify", payload);
+                io.to(sid).emit("message:notify", payloadWithAttachments);
               }
             }
           }
@@ -377,7 +482,7 @@ export function setupSocketHandlers(io: Server) {
                   const otherSocket = io.sockets.sockets.get(sid);
                   // Only send if they haven't already joined this room
                   if (otherSocket && !otherSocket.rooms.has(room_id)) {
-                    otherSocket.emit("message:new", payload);
+                    otherSocket.emit("message:new", payloadWithAttachments);
                   }
                 }
               }
@@ -385,7 +490,7 @@ export function setupSocketHandlers(io: Server) {
           }
 
           if (ack) {
-            ack({ ok: true, message: payload, client_nonce });
+            ack({ ok: true, message: payloadWithAttachments, client_nonce });
           }
         } catch (err) {
           const errorMessage =

@@ -16,6 +16,9 @@ router.get("/info", (_req, res) => {
       maxScreenShareResolution: config.livekit.maxScreenShareResolution,
       maxScreenShareFps: config.livekit.maxScreenShareFps,
     },
+    fileLimits: {
+      maxUploadSizeMB: config.files.maxUploadSizeMB,
+    },
   });
 });
 

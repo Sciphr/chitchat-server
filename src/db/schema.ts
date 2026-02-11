@@ -39,6 +39,22 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS attachments (
+  id TEXT PRIMARY KEY,
+  uploaded_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  original_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  storage_path TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS message_attachments (
+  message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  attachment_id TEXT NOT NULL REFERENCES attachments(id) ON DELETE CASCADE,
+  PRIMARY KEY (message_id, attachment_id)
+);
+
 CREATE TABLE IF NOT EXISTS friends (
   id TEXT PRIMARY KEY,
   user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
@@ -50,6 +66,7 @@ CREATE TABLE IF NOT EXISTS friends (
 
 CREATE INDEX IF NOT EXISTS idx_messages_room_id ON messages(room_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_attachments_uploaded_by ON attachments(uploaded_by);
 CREATE INDEX IF NOT EXISTS idx_friends_user_id ON friends(user_id);
 CREATE INDEX IF NOT EXISTS idx_friends_friend_id ON friends(friend_id);
 `;

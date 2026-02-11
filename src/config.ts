@@ -28,6 +28,11 @@ interface LiveKitConfig {
   maxScreenShareFps: number;
 }
 
+interface FilesConfig {
+  storagePath: string;
+  maxUploadSizeMB: number;
+}
+
 export interface ServerConfig {
   serverName: string;
   serverDescription: string;
@@ -46,6 +51,7 @@ export interface ServerConfig {
   rooms: RoomsConfig;
   adminEmails: string[];
   livekit: LiveKitConfig;
+  files: FilesConfig;
 }
 
 const DEFAULT_CONFIG: ServerConfig = {
@@ -83,6 +89,10 @@ const DEFAULT_CONFIG: ServerConfig = {
     apiSecret: "",
     maxScreenShareResolution: "1080p",
     maxScreenShareFps: 30,
+  },
+  files: {
+    storagePath: "./uploads",
+    maxUploadSizeMB: 25,
   },
 };
 
@@ -175,6 +185,10 @@ export function getRedactedConfig(): ServerConfig {
       apiSecret: cfg.livekit.apiSecret ? REDACTED : "",
       maxScreenShareResolution: cfg.livekit.maxScreenShareResolution,
       maxScreenShareFps: cfg.livekit.maxScreenShareFps,
+    },
+    files: {
+      storagePath: cfg.files.storagePath,
+      maxUploadSizeMB: cfg.files.maxUploadSizeMB,
     },
   };
 }
