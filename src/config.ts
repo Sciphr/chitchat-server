@@ -24,8 +24,6 @@ interface RoomsConfig {
 interface LiveKitConfig {
   apiKey: string;
   apiSecret: string;
-  maxVideoResolution: "360p" | "480p" | "720p" | "1080p" | "1440p";
-  maxVideoFps: number;
   maxScreenShareResolution: "720p" | "1080p" | "1440p" | "4k";
   maxScreenShareFps: number;
 }
@@ -83,8 +81,6 @@ const DEFAULT_CONFIG: ServerConfig = {
   livekit: {
     apiKey: "",
     apiSecret: "",
-    maxVideoResolution: "720p",
-    maxVideoFps: 30,
     maxScreenShareResolution: "1080p",
     maxScreenShareFps: 30,
   },
@@ -177,8 +173,6 @@ export function getRedactedConfig(): ServerConfig {
     livekit: {
       apiKey: cfg.livekit.apiKey ? REDACTED : "",
       apiSecret: cfg.livekit.apiSecret ? REDACTED : "",
-      maxVideoResolution: cfg.livekit.maxVideoResolution,
-      maxVideoFps: cfg.livekit.maxVideoFps,
       maxScreenShareResolution: cfg.livekit.maxScreenShareResolution,
       maxScreenShareFps: cfg.livekit.maxScreenShareFps,
     },

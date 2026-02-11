@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { getDb } from "../db/database.js";
 import { getConfig } from "../config.js";
 import { generateToken, requireAuth } from "../middleware/auth.js";
+import { broadcastPresence } from "../websocket/handler.js";
 
 const router = Router();
 
@@ -219,6 +220,12 @@ router.put("/profile", requireAuth, (req, res) => {
        FROM users WHERE id = ?`
     )
     .get(userId) as Record<string, any>;
+
+  // If status was updated, broadcast presence to all connected clients
+  if (req.body.status !== undefined) {
+    const io = req.app.get("io");
+    if (io) broadcastPresence(io);
+  }
 
   res.json({ ...profile, isAdmin });
 });

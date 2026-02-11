@@ -13,8 +13,6 @@ router.get("/info", (_req, res) => {
     inviteOnly: config.registration.inviteOnly,
     maintenanceMode: config.maintenanceMode,
     mediaLimits: {
-      maxVideoResolution: config.livekit.maxVideoResolution,
-      maxVideoFps: config.livekit.maxVideoFps,
       maxScreenShareResolution: config.livekit.maxScreenShareResolution,
       maxScreenShareFps: config.livekit.maxScreenShareFps,
     },
