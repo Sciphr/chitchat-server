@@ -65,6 +65,23 @@ for cmd in curl git; do
   fi
 done
 
+# Build tools are required for native addons (better-sqlite3)
+if ! command -v g++ &> /dev/null || ! command -v make &> /dev/null; then
+  info "Installing build tools (g++, make, python3)..."
+  if command -v apt-get &> /dev/null; then
+    apt-get update -qq && apt-get install -y -qq build-essential python3 > /dev/null
+  elif command -v dnf &> /dev/null; then
+    dnf install -y -q gcc-c++ make python3 > /dev/null
+  elif command -v yum &> /dev/null; then
+    yum install -y -q gcc-c++ make python3 > /dev/null
+  else
+    fail "Could not install build tools. Please install g++, make, and python3 manually."
+  fi
+  ok "Build tools installed"
+else
+  ok "Build tools available"
+fi
+
 # ─── Banner ───────────────────────────────────────────────────────────
 
 echo ""
