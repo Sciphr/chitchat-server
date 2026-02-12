@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import Sidebar from "../components/layout/Sidebar";
@@ -10,6 +10,9 @@ import Settings from "./Settings";
 import { useSocket } from "../hooks/useSocket";
 import { useAuth } from "../hooks/useAuth";
 import type { Room, ServerUser, VoiceControls } from "../types";
+import { playDmNotification, playTextNotification } from "../lib/sounds";
+
+type NotificationMode = "all" | "mentions" | "mute";
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -23,8 +26,8 @@ function hasUserMention(content: string, username: string) {
 
 export default function Home() {
   const navigate = useNavigate();
-  const { token, user, profile, loading, signOut } = useAuth();
-  const { socket, isConnected } = useSocket();
+  const { token, user, profile, loading, signOut, serverUrl } = useAuth();
+  const { socket, isConnected, isReconnecting, reconnect } = useSocket();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [dmRooms, setDmRooms] = useState<Room[]>([]);
   const [activeRoom, setActiveRoom] = useState<Room | null>(null);
@@ -37,6 +40,12 @@ export default function Home() {
   const [voiceControls, setVoiceControls] = useState<VoiceControls | null>(
     null
   );
+  const [connectedVoiceRoomId, setConnectedVoiceRoomId] = useState<string | null>(
+    null
+  );
+  const [pendingAutoJoinVoiceRoomId, setPendingAutoJoinVoiceRoomId] = useState<
+    string | null
+  >(null);
   const [memberListOpen, setMemberListOpen] = useState(() => {
     const saved = localStorage.getItem("chitchat-member-list-open");
     return saved !== null ? saved === "true" : true;
@@ -44,6 +53,15 @@ export default function Home() {
   const [unreadByRoom, setUnreadByRoom] = useState<Record<string, number>>({});
   const [mentionByRoom, setMentionByRoom] = useState<Record<string, number>>({});
   const [firstUnreadAtByRoom, setFirstUnreadAtByRoom] = useState<Record<string, string>>({});
+  const [notificationModesByRoom, setNotificationModesByRoom] = useState<
+    Record<string, NotificationMode>
+  >({});
+  const lastNotificationSoundAtRef = useRef(0);
+
+  const notificationPrefsStorageKey = useMemo(
+    () => `chitchat-notifications:${serverUrl}:${user?.id ?? "anon"}`,
+    [serverUrl, user?.id]
+  );
 
   function toggleMemberList() {
     setMemberListOpen((prev) => {
@@ -145,7 +163,25 @@ export default function Home() {
       roomId: string,
       participants: Array<{ id: string; name: string; isSpeaking: boolean }>
     ) => {
-      setVoiceParticipants((prev) => ({ ...prev, [roomId]: participants }));
+      setVoiceParticipants((prev) => {
+        const nextParticipants = participants.filter((participant) =>
+          Boolean(participant.id?.trim())
+        );
+        const prevParticipants = prev[roomId] ?? [];
+        const isSameLength = prevParticipants.length === nextParticipants.length;
+        const isSameSnapshot =
+          isSameLength &&
+          prevParticipants.every((participant, index) => {
+            const next = nextParticipants[index];
+            return (
+              participant.id === next.id &&
+              participant.name === next.name &&
+              participant.isSpeaking === next.isSpeaking
+            );
+          });
+        if (isSameSnapshot) return prev;
+        return { ...prev, [roomId]: nextParticipants };
+      });
     },
     []
   );
@@ -175,10 +211,77 @@ export default function Home() {
     if (voiceControls) {
       voiceControls.disconnect();
       setVoiceControls(null);
+      setConnectedVoiceRoomId(null);
     }
     await signOut();
     navigate("/login", { replace: true });
   }
+
+  useEffect(() => {
+    if (!user?.id) {
+      setNotificationModesByRoom({});
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(notificationPrefsStorageKey);
+      if (!raw) {
+        setNotificationModesByRoom({});
+        return;
+      }
+      const parsed = JSON.parse(raw) as Record<string, NotificationMode>;
+      setNotificationModesByRoom(parsed || {});
+    } catch {
+      setNotificationModesByRoom({});
+    }
+  }, [notificationPrefsStorageKey, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    localStorage.setItem(
+      notificationPrefsStorageKey,
+      JSON.stringify(notificationModesByRoom)
+    );
+  }, [notificationModesByRoom, notificationPrefsStorageKey, user?.id]);
+
+  const setRoomNotificationMode = useCallback(
+    (roomId: string, mode: NotificationMode) => {
+      setNotificationModesByRoom((prev) => ({ ...prev, [roomId]: mode }));
+    },
+    []
+  );
+
+  const handleSelectRoom = useCallback(
+    (room: Room) => {
+      if (
+        room.type === "voice" &&
+        voiceControls &&
+        connectedVoiceRoomId &&
+        connectedVoiceRoomId !== room.id
+      ) {
+        setPendingAutoJoinVoiceRoomId(room.id);
+        voiceControls.disconnect();
+        setVoiceControls(null);
+        setConnectedVoiceRoomId(null);
+      } else if (room.type !== "voice") {
+        setPendingAutoJoinVoiceRoomId(null);
+      }
+      setActiveRoom(room);
+    },
+    [voiceControls, connectedVoiceRoomId]
+  );
+
+  const handleVoiceControlsChange = useCallback(
+    (roomId: string, controls: VoiceControls | null) => {
+      setVoiceControls(controls);
+      if (controls) {
+        setConnectedVoiceRoomId((prev) => (prev === roomId ? prev : roomId));
+        setPendingAutoJoinVoiceRoomId((prev) => (prev === roomId ? null : prev));
+      } else {
+        setConnectedVoiceRoomId((prev) => (prev === roomId ? null : prev));
+      }
+    },
+    []
+  );
 
   const markRoomRead = useCallback((roomId: string) => {
     setUnreadByRoom((prev) => {
@@ -215,6 +318,24 @@ export default function Home() {
       if (payload.user_id === user?.id) return;
       if (activeRoom?.id === payload.room_id) return;
 
+      const room =
+        rooms.find((entry) => entry.id === payload.room_id) ||
+        dmRooms.find((entry) => entry.id === payload.room_id);
+      const notificationMode = notificationModesByRoom[payload.room_id] ?? "all";
+      const mentioned = hasUserMention(payload.content, profile.username);
+      const shouldPlaySound =
+        notificationMode === "all" ||
+        (notificationMode === "mentions" && mentioned);
+
+      if (shouldPlaySound) {
+        const now = Date.now();
+        if (now - lastNotificationSoundAtRef.current > 550) {
+          if (room?.type === "dm") playDmNotification();
+          else playTextNotification();
+          lastNotificationSoundAtRef.current = now;
+        }
+      }
+
       setUnreadByRoom((prev) => ({
         ...prev,
         [payload.room_id]: (prev[payload.room_id] ?? 0) + 1,
@@ -225,7 +346,7 @@ export default function Home() {
         return { ...prev, [payload.room_id]: payload.created_at };
       });
 
-      if (hasUserMention(payload.content, profile.username)) {
+      if (mentioned) {
         setMentionByRoom((prev) => ({
           ...prev,
           [payload.room_id]: (prev[payload.room_id] ?? 0) + 1,
@@ -237,7 +358,36 @@ export default function Home() {
     return () => {
       socket.off("message:notify", onMessageNotify);
     };
-  }, [isConnected, socket, activeRoom?.id, profile.username, user?.id]);
+  }, [
+    isConnected,
+    socket,
+    activeRoom?.id,
+    profile.username,
+    user?.id,
+    rooms,
+    dmRooms,
+    notificationModesByRoom,
+  ]);
+
+  const activeVoiceRoom =
+    activeRoom && activeRoom.type === "voice" ? activeRoom : null;
+  const connectedVoiceRoom = useMemo(() => {
+    if (!connectedVoiceRoomId) return null;
+    if (activeVoiceRoom?.id === connectedVoiceRoomId) return activeVoiceRoom;
+    return rooms.find((room) => room.type === "voice" && room.id === connectedVoiceRoomId) ?? null;
+  }, [connectedVoiceRoomId, activeVoiceRoom, rooms]);
+  const voiceSessionRoom = connectedVoiceRoom || activeVoiceRoom;
+  const mentionableUsernames = useMemo(() => {
+    const set = new Set<string>();
+    for (const serverUser of serverUsers) {
+      if (serverUser.username?.trim()) set.add(serverUser.username.trim());
+    }
+    if (profile.username?.trim()) set.add(profile.username.trim());
+    for (const dm of dmRooms) {
+      if (dm.other_username?.trim()) set.add(dm.other_username.trim());
+    }
+    return Array.from(set);
+  }, [serverUsers, profile.username, dmRooms]);
 
   if (loading || !token) {
     return (
@@ -256,7 +406,7 @@ export default function Home() {
           rooms={rooms}
           dmRooms={dmRooms}
           activeRoom={activeRoom}
-          onSelectRoom={setActiveRoom}
+          onSelectRoom={handleSelectRoom}
           onCreateRoom={handleCreateRoom}
           username={profile.username}
           status={profile.status}
@@ -271,6 +421,22 @@ export default function Home() {
 
         {/* Main content area */}
         <main className="flex-1 flex flex-col min-w-0">
+          {!isConnected && token && (
+            <div className="reconnect-banner">
+              <span>
+                {isReconnecting
+                  ? "Connection lost. Reconnecting..."
+                  : "Disconnected from server."}
+              </span>
+              <button
+                type="button"
+                className="reconnect-banner-btn"
+                onClick={reconnect}
+              >
+                Retry now
+              </button>
+            </div>
+          )}
           <div className="flex-1 flex flex-col rounded-2xl panel overflow-hidden">
             {activeRoom ? (
               activeRoom.type === "text" || activeRoom.type === "dm" ? (
@@ -285,17 +451,30 @@ export default function Home() {
                   unreadCount={unreadByRoom[activeRoom.id] ?? 0}
                   firstUnreadAt={firstUnreadAtByRoom[activeRoom.id]}
                   onMarkRead={markRoomRead}
+                  notificationMode={notificationModesByRoom[activeRoom.id] ?? "all"}
+                  onNotificationModeChange={(mode) =>
+                    setRoomNotificationMode(activeRoom.id, mode)
+                  }
+                  mentionableUsernames={mentionableUsernames}
                 />
-              ) : (
-                <VoiceChannel
-                  room={activeRoom}
-                  onParticipantsChange={handleParticipantsChange}
-                  onVoiceControlsChange={setVoiceControls}
-                />
-              )
+              ) : null
             ) : (
               <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
                 Select a channel to get started
+              </div>
+            )}
+            {voiceSessionRoom && (
+              <div
+                className="flex-1 flex flex-col"
+                style={{ display: activeRoom?.type === "voice" ? undefined : "none" }}
+              >
+                <VoiceChannel
+                  key={voiceSessionRoom.id}
+                  room={voiceSessionRoom}
+                  onParticipantsChange={handleParticipantsChange}
+                  autoJoin={pendingAutoJoinVoiceRoomId === voiceSessionRoom.id}
+                  onVoiceControlsChange={handleVoiceControlsChange}
+                />
               </div>
             )}
           </div>

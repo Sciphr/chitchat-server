@@ -98,8 +98,7 @@ export default function Settings({ onClose }: SettingsProps) {
     profile.videoInputId,
   ]);
 
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault();
+  async function saveProfile() {
     setError("");
     setSuccess("");
 
@@ -129,6 +128,11 @@ export default function Settings({ onClose }: SettingsProps) {
     }
 
     setSuccess("Profile updated.");
+  }
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    await saveProfile();
   }
 
   function handleReset() {
@@ -177,19 +181,6 @@ export default function Settings({ onClose }: SettingsProps) {
       let audioOut = devices.filter((d) => d.kind === "audiooutput");
       let videoIn = devices.filter((d) => d.kind === "videoinput");
 
-      // If we only see default entries, try a permission prime and re-enumerate.
-      if (
-        !requestPermissions &&
-        (audioIn.length <= 1 || audioOut.length <= 1) &&
-        typeof navigator.mediaDevices?.getUserMedia === "function"
-      ) {
-        await primeMediaPermissions();
-        devices = await navigator.mediaDevices.enumerateDevices();
-        audioIn = devices.filter((d) => d.kind === "audioinput");
-        audioOut = devices.filter((d) => d.kind === "audiooutput");
-        videoIn = devices.filter((d) => d.kind === "videoinput");
-      }
-
       setAudioInputs(audioIn);
       setAudioOutputs(audioOut);
       setVideoInputs(videoIn);
@@ -207,7 +198,7 @@ export default function Settings({ onClose }: SettingsProps) {
 
   useEffect(() => {
     if (!navigator.mediaDevices?.enumerateDevices) return;
-    loadDevices(true);
+    void loadDevices(false);
     function onDeviceChange() {
       void loadDevices(false);
     }
@@ -277,12 +268,23 @@ export default function Settings({ onClose }: SettingsProps) {
                 Shape how you appear across ChitChat.
               </p>
             </div>
-            <button
-              onClick={handleBack}
-              className="profile-button secondary"
-            >
-              {isModal ? "Close" : "Back"}
-            </button>
+            <div className="profile-actions" style={{ marginTop: 0 }}>
+              <button
+                type="button"
+                onClick={handleBack}
+                className="profile-button secondary"
+              >
+                {isModal ? "Close" : "Back"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveProfile()}
+                disabled={saving}
+                className="profile-button"
+              >
+                {saving ? "Saving..." : "Save changes"}
+              </button>
+            </div>
           </div>
 
           <div className="settings-tabs" role="tablist" aria-label="Profile tabs">

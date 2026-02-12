@@ -1,6 +1,14 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowDownCircle, AtSign, Download, ImageIcon, MessageSquare } from "lucide-react";
+import {
+  ArrowDownCircle,
+  AtSign,
+  Bell,
+  BellOff,
+  Download,
+  ImageIcon,
+  MessageSquare,
+} from "lucide-react";
 import type { Message, MessageAttachment, Room } from "../../types";
 import MessageInput from "./MessageInput";
 import type { Socket } from "socket.io-client";
@@ -17,7 +25,12 @@ interface ChatRoomProps {
   unreadCount?: number;
   firstUnreadAt?: string;
   onMarkRead?: (roomId: string) => void;
+  notificationMode: NotificationMode;
+  onNotificationModeChange: (mode: NotificationMode) => void;
+  mentionableUsernames: string[];
 }
+
+type NotificationMode = "all" | "mentions" | "mute";
 
 function formatBytes(size: number) {
   if (size < 1024) return `${size} B`;
@@ -25,14 +38,44 @@ function formatBytes(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function resolveAttachmentUrl(url: string) {
+  if (/^https?:\/\//i.test(url)) return url;
+  return `${getServerUrl()}${url}`;
+}
+
+function isInternalAttachmentUrl(url: string) {
+  if (!/^https?:\/\//i.test(url)) return true;
+  try {
+    return new URL(url).origin === new URL(getServerUrl()).origin;
+  } catch {
+    return false;
+  }
+}
+
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  return "Download failed";
+}
+
+function getAttachmentMediaKind(attachment: MessageAttachment): "image" | "video" | "other" {
+  if (attachment.mime_type.startsWith("image/")) return "image";
+  if (attachment.mime_type.startsWith("video/")) return "video";
+  const lowerName = attachment.original_name.toLowerCase();
+  if (/\.(png|jpe?g|gif|webp|bmp|svg)$/.test(lowerName)) return "image";
+  if (/\.(mp4|webm|mov|m4v|avi|mkv)$/.test(lowerName)) return "video";
+  return "other";
+}
+
 async function fetchAttachmentBlob(url: string): Promise<Blob> {
   const token = getToken();
-  if (!token) throw new Error("Missing auth token");
-  const res = await fetch(`${getServerUrl()}${url}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
+  const resolvedUrl = resolveAttachmentUrl(url);
+  const headers: Record<string, string> = {};
+  if (isInternalAttachmentUrl(url)) {
+    if (!token) throw new Error("Missing auth token");
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const res = await fetch(resolvedUrl, { headers });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || "Failed to fetch attachment");
@@ -40,17 +83,81 @@ async function fetchAttachmentBlob(url: string): Promise<Blob> {
   return res.blob();
 }
 
-function AttachmentCard({ attachment }: { attachment: MessageAttachment }) {
+function getFirstYouTubeEmbedUrl(text: string): string | null {
+  const match = text.match(/https?:\/\/[^\s]+/gi);
+  if (!match) return null;
+  for (const raw of match) {
+    try {
+      const parsed = new URL(raw);
+      if (parsed.hostname.includes("youtu.be")) {
+        const id = parsed.pathname.replace("/", "").trim();
+        if (id) return `https://www.youtube.com/embed/${id}`;
+      }
+      if (parsed.hostname.includes("youtube.com")) {
+        const id = parsed.searchParams.get("v");
+        if (id) return `https://www.youtube.com/embed/${id}`;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function renderMessageWithMentions(content: string, currentUsername: string) {
+  const mentionPattern = /(@[A-Za-z0-9_.-]+)/g;
+  const ownMentionRegex = currentUsername
+    ? new RegExp(`^@${escapeRegExp(currentUsername)}$`, "i")
+    : null;
+  return content.split(mentionPattern).map((part, index) => {
+    if (!part.startsWith("@")) {
+      return (
+        <Fragment key={`text-${index}`}>
+          {part}
+        </Fragment>
+      );
+    }
+    const isSelf = ownMentionRegex ? ownMentionRegex.test(part) : false;
+    return (
+      <span
+        key={`mention-${index}`}
+        className={`chat-inline-mention ${isSelf ? "self" : ""}`}
+      >
+        {part}
+      </span>
+    );
+  });
+}
+
+function AttachmentCard({
+  attachment,
+  onOpenMedia,
+}: {
+  attachment: MessageAttachment;
+  onOpenMedia: (media: { kind: "image" | "video"; src: string; name: string }) => void;
+}) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const isImage = attachment.mime_type.startsWith("image/");
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [downloadStatus, setDownloadStatus] = useState<string | null>(null);
+  const mediaKind = getAttachmentMediaKind(attachment);
+  const isImage = mediaKind === "image";
+  const isVideo = mediaKind === "video";
 
   useEffect(() => {
     let active = true;
     let objectUrl: string | null = null;
 
     async function loadPreview() {
-      if (!isImage) return;
+      if (!isImage && !isVideo) return;
+      if (!isInternalAttachmentUrl(attachment.url)) {
+        setPreviewUrl(resolveAttachmentUrl(attachment.url));
+        return;
+      }
       try {
         const blob = await fetchAttachmentBlob(attachment.url);
         if (!active) return;
@@ -67,21 +174,63 @@ function AttachmentCard({ attachment }: { attachment: MessageAttachment }) {
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [attachment.id, attachment.url, isImage]);
+  }, [attachment.id, attachment.url, isImage, isVideo]);
 
   async function handleDownload() {
+    setDownloadError(null);
+    setDownloadStatus("Preparing download...");
     try {
+      const resolvedUrl = resolveAttachmentUrl(attachment.url);
+      const isDesktop =
+        typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+      if (!isInternalAttachmentUrl(attachment.url)) {
+        if (isDesktop) {
+          const { openUrl } = await import("@tauri-apps/plugin-opener");
+          await openUrl(resolvedUrl);
+        } else {
+          window.open(resolvedUrl, "_blank", "noopener,noreferrer");
+        }
+        setDownloadStatus("Opened source file");
+        window.setTimeout(() => setDownloadStatus(null), 1800);
+        return;
+      }
+
       const blob = await fetchAttachmentBlob(attachment.url);
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = objectUrl;
-      a.download = attachment.original_name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(objectUrl);
+
+      if (isDesktop) {
+        const { save } = await import("@tauri-apps/plugin-dialog");
+        const { writeFile } = await import("@tauri-apps/plugin-fs");
+        const selectedPath = await save({
+          title: "Save attachment",
+          defaultPath: attachment.original_name,
+        });
+        if (!selectedPath) {
+          setDownloadStatus("Download canceled");
+          window.setTimeout(() => setDownloadStatus(null), 1200);
+          return;
+        }
+        setDownloadStatus("Downloading...");
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        await writeFile(selectedPath, bytes);
+      } else {
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = objectUrl;
+        a.download = attachment.original_name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(objectUrl);
+      }
+
+      setDownloadStatus("Downloaded");
+      window.setTimeout(() => setDownloadStatus(null), 1800);
     } catch (err) {
-      console.error(err);
+      const message = getErrorMessage(err);
+      console.error("Attachment download failed:", message, err);
+      setDownloadError(message);
+      setDownloadStatus(null);
     }
   }
 
@@ -89,15 +238,53 @@ function AttachmentCard({ attachment }: { attachment: MessageAttachment }) {
     <div className="chat-attachment-card">
       {isImage ? (
         previewUrl ? (
-          <img
-            src={previewUrl}
-            alt={attachment.original_name}
-            className="chat-attachment-image"
-          />
+          <button
+            className="chat-attachment-preview-btn"
+            onClick={() =>
+              onOpenMedia({
+                kind: "image",
+                src: previewUrl,
+                name: attachment.original_name,
+              })
+            }
+            title="Open image"
+          >
+            <img
+              src={previewUrl}
+              alt={attachment.original_name}
+              className="chat-attachment-image"
+            />
+          </button>
         ) : (
           <div className="chat-attachment-placeholder">
             <ImageIcon size={14} />
             <span>{previewError ? "Preview unavailable" : "Loading image..."}</span>
+          </div>
+        )
+      ) : isVideo ? (
+        previewUrl ? (
+          <button
+            className="chat-attachment-preview-btn"
+            onClick={() =>
+              onOpenMedia({
+                kind: "video",
+                src: previewUrl,
+                name: attachment.original_name,
+              })
+            }
+            title="Open video"
+          >
+            <video
+              src={previewUrl}
+              className="chat-attachment-image"
+              muted
+              playsInline
+            />
+          </button>
+        ) : (
+          <div className="chat-attachment-placeholder">
+            <MessageSquare size={14} />
+            <span>{previewError ? "Preview unavailable" : "Loading video..."}</span>
           </div>
         )
       ) : (
@@ -115,6 +302,14 @@ function AttachmentCard({ attachment }: { attachment: MessageAttachment }) {
       <button className="chat-attachment-download" onClick={handleDownload}>
         <Download size={12} />
       </button>
+      {downloadStatus && (
+        <div className="chat-attachment-status">{downloadStatus}</div>
+      )}
+      {downloadError && (
+        <div className="chat-attachment-error">
+          {downloadError}
+        </div>
+      )}
     </div>
   );
 }
@@ -130,6 +325,9 @@ export default function ChatRoom({
   unreadCount = 0,
   firstUnreadAt,
   onMarkRead,
+  notificationMode,
+  onNotificationModeChange,
+  mentionableUsernames,
 }: ChatRoomProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -137,12 +335,19 @@ export default function ChatRoom({
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
+  const [mediaPreview, setMediaPreview] = useState<{
+    kind: "image" | "video";
+    src: string;
+    name: string;
+  } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatBodyRef = useRef<HTMLDivElement>(null);
   const unreadMarkerRef = useRef<HTMLDivElement>(null);
   const shouldScrollRef = useRef(true);
   const typingActiveRef = useRef(false);
   const typingStopTimerRef = useRef<number | null>(null);
+  const notificationMenuRef = useRef<HTMLDivElement | null>(null);
+  const [notificationMenuOpen, setNotificationMenuOpen] = useState(false);
 
   const firstUnreadIndex = useMemo(() => {
     if (!firstUnreadAt || unreadCount <= 0) return -1;
@@ -471,6 +676,27 @@ export default function ChatRoom({
           ? `${typingNames[0]} and ${typingNames[1]} are typing...`
           : `${typingNames[0]} and ${typingNames.length - 1} others are typing...`;
 
+  useEffect(() => {
+    if (!notificationMenuOpen) return;
+    function onDocumentClick(event: MouseEvent) {
+      if (
+        notificationMenuRef.current &&
+        !notificationMenuRef.current.contains(event.target as Node)
+      ) {
+        setNotificationMenuOpen(false);
+      }
+    }
+    window.addEventListener("mousedown", onDocumentClick);
+    return () => window.removeEventListener("mousedown", onDocumentClick);
+  }, [notificationMenuOpen]);
+
+  const notificationLabel =
+    notificationMode === "mute"
+      ? "Muted"
+      : notificationMode === "mentions"
+      ? "Mentions"
+      : "All";
+
   return (
     <div className="flex flex-col h-full chat-shell">
       {/* Room header */}
@@ -492,12 +718,59 @@ export default function ChatRoom({
             <h2 className="room-header-title heading-font">{room.name}</h2>
           </>
         )}
-        {unreadCount > 0 && (
-          <button className="room-header-jump" onClick={handleJumpToUnread}>
-            <ArrowDownCircle size={14} />
-            <span>Jump to first unread ({unreadCount})</span>
-          </button>
-        )}
+        <div className="room-header-actions">
+          <div className="room-header-notifications" ref={notificationMenuRef}>
+            <button
+              type="button"
+              className={`room-header-notify ${notificationMode === "mute" ? "muted" : ""}`}
+              onClick={() => setNotificationMenuOpen((prev) => !prev)}
+              title={`Notifications: ${notificationLabel}`}
+            >
+              {notificationMode === "mute" ? <BellOff size={14} /> : <Bell size={14} />}
+              <span>{notificationLabel}</span>
+            </button>
+            {notificationMenuOpen && (
+              <div className="room-header-notify-menu">
+                <button
+                  type="button"
+                  className={notificationMode === "all" ? "active" : ""}
+                  onClick={() => {
+                    onNotificationModeChange("all");
+                    setNotificationMenuOpen(false);
+                  }}
+                >
+                  All messages
+                </button>
+                <button
+                  type="button"
+                  className={notificationMode === "mentions" ? "active" : ""}
+                  onClick={() => {
+                    onNotificationModeChange("mentions");
+                    setNotificationMenuOpen(false);
+                  }}
+                >
+                  Mentions only
+                </button>
+                <button
+                  type="button"
+                  className={notificationMode === "mute" ? "active" : ""}
+                  onClick={() => {
+                    onNotificationModeChange("mute");
+                    setNotificationMenuOpen(false);
+                  }}
+                >
+                  Mute
+                </button>
+              </div>
+            )}
+          </div>
+          {unreadCount > 0 && (
+            <button className="room-header-jump" onClick={handleJumpToUnread}>
+              <ArrowDownCircle size={14} />
+              <span>Jump to first unread ({unreadCount})</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Messages area */}
@@ -536,6 +809,7 @@ export default function ChatRoom({
           const failed = Boolean(msg.failed);
           const canRetry = failed && isOwnMessage;
           const canDelete = !pending && !failed && !msg.id.startsWith("temp-") && (isOwnMessage || isAdmin);
+          const youtubeEmbedUrl = getFirstYouTubeEmbedUrl(msg.content);
 
           return (
             <Fragment key={msg.id}>
@@ -589,13 +863,27 @@ export default function ChatRoom({
                     </span>
                   </div>
                   <p className="text-sm text-[var(--text-secondary)] break-words leading-relaxed">
-                    {msg.content}
+                    {renderMessageWithMentions(msg.content, currentUsername)}
                   </p>
                   {msg.attachments && msg.attachments.length > 0 && (
                     <div className="chat-attachments-list">
                       {msg.attachments.map((attachment) => (
-                        <AttachmentCard key={attachment.id} attachment={attachment} />
+                        <AttachmentCard
+                          key={attachment.id}
+                          attachment={attachment}
+                          onOpenMedia={setMediaPreview}
+                        />
                       ))}
+                    </div>
+                  )}
+                  {youtubeEmbedUrl && (
+                    <div className="chat-embed">
+                      <iframe
+                        src={youtubeEmbedUrl}
+                        title="Video preview"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowFullScreen
+                      />
                     </div>
                   )}
                 </div>
@@ -637,6 +925,7 @@ export default function ChatRoom({
       <MessageInput
         onSend={(content, attachments) => handleSend(content, attachments || [])}
         onTypingChange={handleTypingChange}
+        mentionUsernames={mentionableUsernames}
         disabled={!isConnected}
         placeholder={room.type === "dm" ? `Message @${room.other_username || "user"}` : `Message #${room.name}`}
       />
@@ -672,6 +961,43 @@ export default function ChatRoom({
               >
                 Delete
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {mediaPreview && (
+        <div
+          className="chat-media-overlay"
+          onClick={() => setMediaPreview(null)}
+        >
+          <div
+            className="chat-media-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="chat-media-header">
+              <span className="chat-media-title">{mediaPreview.name}</span>
+              <button
+                className="chat-media-close"
+                onClick={() => setMediaPreview(null)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="chat-media-body">
+              {mediaPreview.kind === "image" ? (
+                <img
+                  src={mediaPreview.src}
+                  alt={mediaPreview.name}
+                  className="chat-media-full"
+                />
+              ) : (
+                <video
+                  src={mediaPreview.src}
+                  controls
+                  autoPlay
+                  className="chat-media-full"
+                />
+              )}
             </div>
           </div>
         </div>

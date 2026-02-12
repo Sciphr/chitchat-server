@@ -2,6 +2,11 @@ let ctx: AudioContext | null = null;
 
 function getCtx(): AudioContext {
   if (!ctx) ctx = new AudioContext();
+  if (ctx.state === "suspended") {
+    void ctx.resume().catch(() => {
+      // Ignore resume errors; a later user gesture can retry.
+    });
+  }
   return ctx;
 }
 
@@ -55,4 +60,16 @@ export function playDeafen() {
 export function playUndeafen() {
   playTone(380, 0.08, "triangle", 0.1);
   setTimeout(() => playTone(520, 0.08, "triangle", 0.1), 60);
+}
+
+/** Soft ping for text channel notifications */
+export function playTextNotification() {
+  playTone(740, 0.07, "sine", 0.08);
+  setTimeout(() => playTone(880, 0.07, "sine", 0.07), 55);
+}
+
+/** Slightly different ping for DM notifications */
+export function playDmNotification() {
+  playTone(660, 0.08, "triangle", 0.09);
+  setTimeout(() => playTone(990, 0.06, "triangle", 0.08), 70);
 }

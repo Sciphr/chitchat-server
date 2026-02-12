@@ -27,8 +27,9 @@ import { playJoin, playLeave, playMute, playUnmute, playDeafen, playUndeafen } f
 
 interface VoiceChannelProps {
   room: Room;
+  autoJoin?: boolean;
   onParticipantsChange?: (roomId: string, participants: VoiceParticipant[]) => void;
-  onVoiceControlsChange?: (controls: VoiceControls | null) => void;
+  onVoiceControlsChange?: (roomId: string, controls: VoiceControls | null) => void;
 }
 
 interface VoiceParticipant {
@@ -56,7 +57,7 @@ function VoiceRoomContent({
   roomId: string;
   mediaLimits: MediaLimits;
   onParticipantsChange?: (roomId: string, participants: VoiceParticipant[]) => void;
-  onVoiceControlsChange?: (controls: VoiceControls | null) => void;
+  onVoiceControlsChange?: (roomId: string, controls: VoiceControls | null) => void;
 }) {
   const room = useRoomContext();
   const { isCameraEnabled } = useLocalParticipant();
@@ -268,12 +269,21 @@ function VoiceRoomContent({
   const prevCountRef = useRef(0);
   useEffect(() => {
     if (!onParticipantsChange) return;
-    const mapped = participants.map((participant) => ({
-      id: participant.identity,
-      name: participant.name || participant.identity,
-      // Use audioLevel as an immediate hint to reduce speaking-indicator lag.
-      isSpeaking: (participant.audioLevel ?? 0) > 0.02 || (participant.isSpeaking ?? false),
-    }));
+    const dedupedById = new Map<string, VoiceParticipant>();
+    for (const participant of participants) {
+      const id = participant.identity?.trim();
+      if (!id) continue;
+      const mappedParticipant: VoiceParticipant = {
+        id,
+        name: participant.name || id,
+        // Use audioLevel as an immediate hint to reduce speaking-indicator lag.
+        isSpeaking:
+          (participant.audioLevel ?? 0) > 0.02 ||
+          (participant.isSpeaking ?? false),
+      };
+      dedupedById.set(id, mappedParticipant);
+    }
+    const mapped = Array.from(dedupedById.values());
     onParticipantsChange(roomId, mapped);
 
     const prevCount = prevCountRef.current;
@@ -447,7 +457,7 @@ function VoiceRoomContent({
   // Report voice controls upward for the Sidebar
   useEffect(() => {
     if (!onVoiceControlsChange) return;
-    onVoiceControlsChange({
+    onVoiceControlsChange(roomId, {
       isConnected,
       isMuted: manualMute,
       isDeafened: deafened,
@@ -492,6 +502,7 @@ function VoiceRoomContent({
     handleLeave,
     onVoiceControlsChange,
     mediaLimits,
+    roomId,
   ]);
 
   // Filter screen share tracks (only actual track references, not placeholders)
@@ -566,7 +577,7 @@ function VoiceRoomContent({
           {tiles.map((tile) => (
             <div
               key={tile.key}
-              className="voice-tile-wrapper"
+              className={`voice-tile-wrapper ${tileCount === 1 ? "no-enter" : ""}`}
               onClick={() => handleTileClick(tile.key)}
             >
               <TileContent tile={tile} />
@@ -692,23 +703,33 @@ const LIVEKIT_RECONNECT_POLICY = new DefaultReconnectPolicy([
   7000,
 ]);
 
-export default function VoiceChannel({ room, onParticipantsChange, onVoiceControlsChange }: VoiceChannelProps) {
+export default function VoiceChannel({
+  room,
+  autoJoin = false,
+  onParticipantsChange,
+  onVoiceControlsChange,
+}: VoiceChannelProps) {
   const { user, profile } = useAuth();
   const [token, setToken] = useState<string | null>(null);
   const [mediaLimits, setMediaLimits] = useState<MediaLimits>(DEFAULT_MEDIA_LIMITS);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const autoJoinAttemptedRef = useRef(false);
 
   const livekitUrl = getLiveKitUrl();
 
   useEffect(() => {
+    autoJoinAttemptedRef.current = false;
+  }, [room.id]);
+
+  useEffect(() => {
     return () => {
       onParticipantsChange?.(room.id, []);
-      onVoiceControlsChange?.(null);
+      onVoiceControlsChange?.(room.id, null);
     };
   }, [onParticipantsChange, onVoiceControlsChange, room.id]);
 
-  async function handleJoin() {
+  const handleJoin = useCallback(async () => {
     if (!user) return;
     if (!livekitUrl) {
       setError("LiveKit URL is not configured.");
@@ -730,13 +751,19 @@ export default function VoiceChannel({ room, onParticipantsChange, onVoiceContro
     } finally {
       setConnecting(false);
     }
-  }
+  }, [user, livekitUrl, room.id, profile.username]);
 
   const handleLeave = useCallback(() => {
     setToken(null);
     onParticipantsChange?.(room.id, []);
-    onVoiceControlsChange?.(null);
+    onVoiceControlsChange?.(room.id, null);
   }, [onParticipantsChange, onVoiceControlsChange, room.id]);
+
+  useEffect(() => {
+    if (!autoJoin || token || connecting || autoJoinAttemptedRef.current) return;
+    autoJoinAttemptedRef.current = true;
+    void handleJoin();
+  }, [autoJoin, token, connecting, handleJoin]);
 
   return (
     <div className="flex flex-col h-full">
