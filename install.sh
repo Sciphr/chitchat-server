@@ -170,9 +170,10 @@ fi
 if [ -f "$LIVEKIT_CONFIG" ]; then
   ok "LiveKit config already exists, preserving"
 
-  # Read existing API key and secret from config
-  LK_API_KEY=$(grep -E '^\s+\S+:' "$LIVEKIT_CONFIG" | head -1 | sed -E 's/^\s+(\S+):.*/\1/' || echo "")
-  LK_API_SECRET=$(grep -E '^\s+\S+:' "$LIVEKIT_CONFIG" | head -1 | sed -E 's/^\s+\S+:\s*(\S+).*/\1/' || echo "")
+  # Read existing API key and secret from the "keys:" section of the YAML
+  # Format is:  keys:\n    APIxxx: secret-string
+  LK_API_KEY=$(awk '/^keys:/{getline; print; exit}' "$LIVEKIT_CONFIG" | sed -E 's/^\s+(\S+):.*/\1/' || echo "")
+  LK_API_SECRET=$(awk '/^keys:/{getline; print; exit}' "$LIVEKIT_CONFIG" | sed -E 's/^\s+\S+:\s*(\S+).*/\1/' || echo "")
 else
   info "Generating LiveKit API credentials..."
 
@@ -356,8 +357,11 @@ fi
 
 info "Configuring LiveKit connection..."
 
-# Detect the server's IP address for the LiveKit URL
-SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
+# Detect the server's primary IP address (the one used for default route)
+SERVER_IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -1)
+if [ -z "$SERVER_IP" ]; then
+  SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
+fi
 LK_WS_URL="ws://${SERVER_IP}:${LIVEKIT_PORT}"
 
 # Use node to safely update JSON config
