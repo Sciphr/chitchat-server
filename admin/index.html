@@ -512,6 +512,11 @@
 
       <div class="card">
         <h3>Media (LiveKit)</h3>
+        <div class="field">
+          <label for="cfg-lk-url">LiveKit URL</label>
+          <input type="text" id="cfg-lk-url" placeholder="ws://your-server:7880">
+          <div class="field-hint">WebSocket URL for the LiveKit server. Clients auto-discover this from the server.</div>
+        </div>
 <div class="field">
           <label for="cfg-lk-maxScreenRes">Max Screen Share Resolution</label>
           <select id="cfg-lk-maxScreenRes">
@@ -531,6 +536,20 @@
             <option value="60">60 fps</option>
           </select>
           <div class="field-hint">Lower FPS uses less bandwidth. 5-15 fps is fine for static content.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>File Storage</h3>
+        <div class="field">
+          <label for="cfg-files-storagePath">Storage Directory</label>
+          <input type="text" id="cfg-files-storagePath" placeholder="./uploads">
+          <div class="field-hint">Absolute or relative path where uploaded files are saved</div>
+        </div>
+        <div class="field">
+          <label for="cfg-files-maxUploadSizeMB">Max Upload Size (MB)</label>
+          <input type="number" id="cfg-files-maxUploadSizeMB" min="1" max="1024">
+          <div class="field-hint">Maximum file size per upload (1–1024 MB)</div>
         </div>
       </div>
 
@@ -777,13 +796,20 @@
 
       $('#cfg-rooms-userCanCreate').checked = currentConfig.rooms.userCanCreate;
 
-      // LiveKit media limits
+      // LiveKit
       if (currentConfig.livekit) {
+        $('#cfg-lk-url').value = currentConfig.livekit.url || '';
         $('#cfg-lk-maxScreenRes').value = currentConfig.livekit.maxScreenShareResolution || '1080p';
         $('#cfg-lk-maxScreenFps').value = String(currentConfig.livekit.maxScreenShareFps || 30);
       }
 
       $('#cfg-adminEmails').value = currentConfig.adminEmails.join('\n');
+
+      // File storage
+      if (currentConfig.files) {
+        $('#cfg-files-storagePath').value = currentConfig.files.storagePath || './uploads';
+        $('#cfg-files-maxUploadSizeMB').value = currentConfig.files.maxUploadSizeMB || 25;
+      }
     } catch (err) {
       toast(err.message, 'error');
     }
@@ -815,8 +841,13 @@
       },
       adminEmails: parseLines($('#cfg-adminEmails').value),
       livekit: {
+        url: $('#cfg-lk-url').value.trim(),
         maxScreenShareResolution: $('#cfg-lk-maxScreenRes').value,
         maxScreenShareFps: parseInt($('#cfg-lk-maxScreenFps').value, 10),
+      },
+      files: {
+        storagePath: $('#cfg-files-storagePath').value.trim(),
+        maxUploadSizeMB: parseInt($('#cfg-files-maxUploadSizeMB').value, 10) || 25,
       },
     };
 

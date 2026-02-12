@@ -22,6 +22,7 @@ interface RoomsConfig {
 }
 
 interface LiveKitConfig {
+  url: string;
   apiKey: string;
   apiSecret: string;
   maxScreenShareResolution: "720p" | "1080p" | "1440p" | "4k";
@@ -85,6 +86,7 @@ const DEFAULT_CONFIG: ServerConfig = {
   },
   adminEmails: [],
   livekit: {
+    url: "",
     apiKey: "",
     apiSecret: "",
     maxScreenShareResolution: "1080p",
@@ -149,6 +151,8 @@ export function loadConfig(): ServerConfig {
   if (process.env.PORT) merged.port = parseInt(process.env.PORT, 10);
   if (process.env.JWT_SECRET) merged.jwtSecret = process.env.JWT_SECRET;
   if (process.env.DB_PATH) merged.dbPath = process.env.DB_PATH;
+  if (process.env.LIVEKIT_URL)
+    merged.livekit.url = process.env.LIVEKIT_URL;
   if (process.env.LIVEKIT_API_KEY)
     merged.livekit.apiKey = process.env.LIVEKIT_API_KEY;
   if (process.env.LIVEKIT_API_SECRET)
@@ -181,6 +185,7 @@ export function getRedactedConfig(): ServerConfig {
     ...cfg,
     jwtSecret: REDACTED,
     livekit: {
+      url: cfg.livekit.url,
       apiKey: cfg.livekit.apiKey ? REDACTED : "",
       apiSecret: cfg.livekit.apiSecret ? REDACTED : "",
       maxScreenShareResolution: cfg.livekit.maxScreenShareResolution,
