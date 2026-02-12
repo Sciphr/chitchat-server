@@ -517,7 +517,17 @@
           <input type="text" id="cfg-lk-url" placeholder="ws://your-server:7880">
           <div class="field-hint">WebSocket URL for the LiveKit server. Clients auto-discover this from the server.</div>
         </div>
-<div class="field">
+        <div class="field">
+          <label for="cfg-lk-apiKey">API Key</label>
+          <input type="text" id="cfg-lk-apiKey" placeholder="APIxxxxxxxxxxxx">
+          <div class="field-hint">LiveKit API key. Shown redacted — enter a new value to change it.</div>
+        </div>
+        <div class="field">
+          <label for="cfg-lk-apiSecret">API Secret</label>
+          <input type="text" id="cfg-lk-apiSecret" placeholder="secret">
+          <div class="field-hint">LiveKit API secret. Shown redacted — enter a new value to change it.</div>
+        </div>
+        <div class="field">
           <label for="cfg-lk-maxScreenRes">Max Screen Share Resolution</label>
           <select id="cfg-lk-maxScreenRes">
             <option value="720p">720p (1280×720)</option>
@@ -799,6 +809,8 @@
       // LiveKit
       if (currentConfig.livekit) {
         $('#cfg-lk-url').value = currentConfig.livekit.url || '';
+        $('#cfg-lk-apiKey').value = currentConfig.livekit.apiKey || '';
+        $('#cfg-lk-apiSecret').value = currentConfig.livekit.apiSecret || '';
         $('#cfg-lk-maxScreenRes').value = currentConfig.livekit.maxScreenShareResolution || '1080p';
         $('#cfg-lk-maxScreenFps').value = String(currentConfig.livekit.maxScreenShareFps || 30);
       }
@@ -842,6 +854,8 @@
       adminEmails: parseLines($('#cfg-adminEmails').value),
       livekit: {
         url: $('#cfg-lk-url').value.trim(),
+        apiKey: $('#cfg-lk-apiKey').value.trim(),
+        apiSecret: $('#cfg-lk-apiSecret').value.trim(),
         maxScreenShareResolution: $('#cfg-lk-maxScreenRes').value,
         maxScreenShareFps: parseInt($('#cfg-lk-maxScreenFps').value, 10),
       },
