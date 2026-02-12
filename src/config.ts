@@ -221,9 +221,10 @@ export function updateConfig(
     delete partial.jwtSecret;
   }
   if (partial.livekit) {
-    if (partial.livekit.apiKey === REDACTED) delete partial.livekit.apiKey;
-    if (partial.livekit.apiSecret === REDACTED) delete partial.livekit.apiSecret;
-    if (Object.keys(partial.livekit).length === 0) delete partial.livekit;
+    const lk = partial.livekit as Partial<LiveKitConfig>;
+    if (lk.apiKey === REDACTED) delete lk.apiKey;
+    if (lk.apiSecret === REDACTED) delete lk.apiSecret;
+    if (Object.keys(lk).length === 0) delete partial.livekit;
   }
 
   const updated: ServerConfig = deepMerge(config, partial);
