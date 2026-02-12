@@ -45,9 +45,13 @@
   "livekit": {
     "apiKey": "devkey",
     "apiSecret": "secret",
-    "maxVideoResolution": "1080p",
-    "maxVideoFps": 60,
     "maxScreenShareResolution": "4k",
-    "maxScreenShareFps": 60
+    "maxScreenShareFps": 60,
+    "maxVideoResolution": "1080p",
+    "maxVideoFps": 60
+  },
+  "files": {
+    "storagePath": "./uploads",
+    "maxUploadSizeMB": 25
   }
 }

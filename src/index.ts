@@ -10,6 +10,7 @@ import { setupSocketHandlers } from "./websocket/handler.js";
 import authRoutes from "./routes/auth.js";
 import roomsRoutes from "./routes/rooms.js";
 import livekitRoutes from "./routes/livekit.js";
+import filesRoutes from "./routes/files.js";
 import serverInfoRoutes from "./routes/serverInfo.js";
 import adminRoutes from "./routes/admin.js";
 
@@ -42,6 +43,7 @@ app.set("io", io);
 app.use("/api/auth", authRoutes);
 app.use("/api/rooms", roomsRoutes);
 app.use("/api/livekit", livekitRoutes);
+app.use("/api/files", filesRoutes);
 app.use("/api/server", serverInfoRoutes);
 app.use("/api/admin", adminRoutes);
 
@@ -81,6 +83,16 @@ httpServer.listen(config.port, () => {
   console.log(`\n  ${config.serverName}`);
   console.log(`  Running on http://localhost:${config.port}`);
   console.log(`  WebSocket ready for connections\n`);
+});
+
+httpServer.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(
+      `\n  Port ${config.port} is already in use. Stop the other server process or change 'port' in server/config.json.\n`
+    );
+    process.exit(1);
+  }
+  throw err;
 });
 
 // Graceful shutdown

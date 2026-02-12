@@ -512,26 +512,7 @@
 
       <div class="card">
         <h3>Media (LiveKit)</h3>
-        <div class="field">
-          <label for="cfg-lk-maxVideoRes">Max Camera Resolution</label>
-          <select id="cfg-lk-maxVideoRes">
-            <option value="360p">360p (640×360)</option>
-            <option value="480p">480p (854×480)</option>
-            <option value="720p">720p (1280×720)</option>
-            <option value="1080p">1080p (1920×1080)</option>
-            <option value="1440p">1440p (2560×1440)</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="cfg-lk-maxVideoFps">Max Camera FPS</label>
-          <select id="cfg-lk-maxVideoFps">
-            <option value="15">15 fps</option>
-            <option value="24">24 fps</option>
-            <option value="30">30 fps</option>
-            <option value="60">60 fps</option>
-          </select>
-        </div>
-        <div class="field">
+<div class="field">
           <label for="cfg-lk-maxScreenRes">Max Screen Share Resolution</label>
           <select id="cfg-lk-maxScreenRes">
             <option value="720p">720p (1280×720)</option>
@@ -798,8 +779,6 @@
 
       // LiveKit media limits
       if (currentConfig.livekit) {
-        $('#cfg-lk-maxVideoRes').value = currentConfig.livekit.maxVideoResolution || '720p';
-        $('#cfg-lk-maxVideoFps').value = String(currentConfig.livekit.maxVideoFps || 30);
         $('#cfg-lk-maxScreenRes').value = currentConfig.livekit.maxScreenShareResolution || '1080p';
         $('#cfg-lk-maxScreenFps').value = String(currentConfig.livekit.maxScreenShareFps || 30);
       }
@@ -836,8 +815,6 @@
       },
       adminEmails: parseLines($('#cfg-adminEmails').value),
       livekit: {
-        maxVideoResolution: $('#cfg-lk-maxVideoRes').value,
-        maxVideoFps: parseInt($('#cfg-lk-maxVideoFps').value, 10),
         maxScreenShareResolution: $('#cfg-lk-maxScreenRes').value,
         maxScreenShareFps: parseInt($('#cfg-lk-maxScreenFps').value, 10),
       },
@@ -995,3 +972,4 @@
 </script>
 </body>
 </html>
+

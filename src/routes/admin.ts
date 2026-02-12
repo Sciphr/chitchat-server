@@ -87,24 +87,29 @@ router.put("/config", requireAuth, requireAdmin, (req, res) => {
     return;
   }
 
+  // Validate file storage limits
+  if (partial.files) {
+    if (
+      partial.files.storagePath !== undefined &&
+      (typeof partial.files.storagePath !== "string" || !partial.files.storagePath.trim())
+    ) {
+      res.status(400).json({ error: "files.storagePath must be a non-empty string" });
+      return;
+    }
+    if (
+      partial.files.maxUploadSizeMB !== undefined &&
+      (typeof partial.files.maxUploadSizeMB !== "number" ||
+        partial.files.maxUploadSizeMB < 1 ||
+        partial.files.maxUploadSizeMB > 1024)
+    ) {
+      res.status(400).json({ error: "files.maxUploadSizeMB must be between 1 and 1024" });
+      return;
+    }
+  }
+
   // Validate LiveKit media limits
   if (partial.livekit) {
-    const validVideoRes = ["360p", "480p", "720p", "1080p", "1440p"];
     const validScreenRes = ["720p", "1080p", "1440p", "4k"];
-    if (
-      partial.livekit.maxVideoResolution !== undefined &&
-      !validVideoRes.includes(partial.livekit.maxVideoResolution)
-    ) {
-      res.status(400).json({ error: `maxVideoResolution must be one of: ${validVideoRes.join(", ")}` });
-      return;
-    }
-    if (
-      partial.livekit.maxVideoFps !== undefined &&
-      (typeof partial.livekit.maxVideoFps !== "number" || ![15, 24, 30, 60].includes(partial.livekit.maxVideoFps))
-    ) {
-      res.status(400).json({ error: "maxVideoFps must be one of: 15, 24, 30, 60" });
-      return;
-    }
     if (
       partial.livekit.maxScreenShareResolution !== undefined &&
       !validScreenRes.includes(partial.livekit.maxScreenShareResolution)
