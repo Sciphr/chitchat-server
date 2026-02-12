@@ -1,5 +1,6 @@
 import "dotenv/config";
 import path from "path";
+import { fileURLToPath } from "url";
 import express from "express";
 import cors from "cors";
 import { createServer } from "http";
@@ -14,6 +15,9 @@ import livekitRoutes from "./routes/livekit.js";
 import filesRoutes from "./routes/files.js";
 import serverInfoRoutes from "./routes/serverInfo.js";
 import adminRoutes from "./routes/admin.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 async function main() {
   const args = process.argv.slice(2);
@@ -59,9 +63,11 @@ async function main() {
   app.use("/api/admin", adminRoutes);
 
   // Standalone admin panel (served from server/admin/)
-  app.use("/admin", express.static(path.join(process.cwd(), "admin")));
+  // __dirname = server/dist/, so go up one level to reach server/admin/
+  const adminDir = path.join(__dirname, "..", "admin");
+  app.use("/admin", express.static(adminDir));
   app.get("/admin", (_req, res) => {
-    res.sendFile(path.join(process.cwd(), "admin", "index.html"));
+    res.sendFile(path.join(adminDir, "index.html"));
   });
 
   // Health check
