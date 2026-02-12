@@ -27,6 +27,7 @@ export interface Room {
 }
 
 export interface VoiceControls {
+  isConnected: boolean;
   isMuted: boolean;
   isDeafened: boolean;
   isCameraOn: boolean;

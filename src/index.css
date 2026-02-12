@@ -214,6 +214,12 @@ body {
   pointer-events: none;
 }
 
+.titlebar-status {
+  font-size: 11px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
 .titlebar-controls {
   display: flex;
   height: 100%;
@@ -235,6 +241,11 @@ body {
 .titlebar-btn:hover {
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-primary);
+}
+
+.titlebar-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .titlebar-btn-close:hover {
@@ -1264,9 +1275,36 @@ body {
 }
 
 .chat-message {
-  margin: 2px 0;
+  margin: 6px 0;
   position: relative;
   overflow: hidden;
+}
+
+.chat-message.own {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent) 9%, var(--bg-secondary)) 0%,
+    color-mix(in srgb, var(--accent) 4%, var(--bg-secondary)) 100%
+  );
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+  box-shadow:
+    0 12px 30px -22px rgba(0, 0, 0, 0.7),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.chat-message-you-tag {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: color-mix(in srgb, white 82%, var(--accent));
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1;
 }
 
 .chat-load-more {

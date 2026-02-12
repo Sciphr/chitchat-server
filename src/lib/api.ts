@@ -1,7 +1,7 @@
 let serverUrl =
   localStorage.getItem("chitchat_server_url") ||
   (import.meta.env.VITE_SERVER_URL as string) ||
-  "http://localhost:3001";
+  "";
 
 let authToken: string | null = localStorage.getItem("chitchat_token");
 

@@ -14,6 +14,7 @@ import {
 import {
   Track,
   RoomEvent,
+  ConnectionState,
   RemoteAudioTrack,
   VideoPresets,
   DefaultReconnectPolicy,
@@ -71,6 +72,9 @@ function VoiceRoomContent({
   const [manualMute, setManualMute] = useState(false);
   const [deafened, setDeafened] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [isConnected, setIsConnected] = useState(
+    room.state === ConnectionState.Connected
+  );
   const [noiseSuppressionEnabled, setNoiseSuppressionEnabled] = useState(true);
   const [audioInputDeviceId, setAudioInputDeviceId] = useState("");
   const [audioOutputDeviceId, setAudioOutputDeviceId] = useState("");
@@ -101,9 +105,21 @@ function VoiceRoomContent({
     [noiseSuppressionEnabled]
   );
 
+  useEffect(() => {
+    setIsConnected(room.state === ConnectionState.Connected);
+    function onConnectionStateChanged(nextState: ConnectionState) {
+      setIsConnected(nextState === ConnectionState.Connected);
+    }
+    room.on(RoomEvent.ConnectionStateChanged, onConnectionStateChanged);
+    return () => {
+      room.off(RoomEvent.ConnectionStateChanged, onConnectionStateChanged);
+    };
+  }, [room]);
+
   // Mic enable/disable based on mute/deafen/PTT/noise suppression
   useEffect(() => {
     if (!room) return;
+    if (room.state !== ConnectionState.Connected) return;
 
     async function applyMicState() {
       if (pushToTalkEnabled || manualMute || deafened) {
@@ -113,7 +129,9 @@ function VoiceRoomContent({
       await room.localParticipant.setMicrophoneEnabled(true, micCaptureOptions);
     }
 
-    void applyMicState();
+    void applyMicState().catch(() => {
+      // Connection can drop while applying; ignore transient publish errors.
+    });
   }, [room, pushToTalkEnabled, manualMute, deafened, micCaptureOptions]);
 
   // Apply per-user volume (and deafen override) to all remote audio tracks.
@@ -205,7 +223,7 @@ function VoiceRoomContent({
 
   // Push-to-talk keyboard handler
   useEffect(() => {
-    if (!room || !pushToTalkEnabled) return;
+    if (!room || !pushToTalkEnabled || room.state !== ConnectionState.Connected) return;
 
     function isTypingTarget(target: EventTarget | null) {
       if (!target || !(target as HTMLElement).tagName) return false;
@@ -217,13 +235,17 @@ function VoiceRoomContent({
       if (deafened || manualMute) return;
       if (isTypingTarget(e.target)) return;
       if (e.code === pushToTalkKey || e.key === pushToTalkKey) {
-        room.localParticipant.setMicrophoneEnabled(true, micCaptureOptions);
+        room.localParticipant.setMicrophoneEnabled(true, micCaptureOptions).catch(() => {
+          // Ignore publish race while reconnecting.
+        });
       }
     }
 
     function onKeyUp(e: KeyboardEvent) {
       if (e.code === pushToTalkKey || e.key === pushToTalkKey) {
-        room.localParticipant.setMicrophoneEnabled(false);
+        room.localParticipant.setMicrophoneEnabled(false).catch(() => {
+          // Ignore publish race while reconnecting.
+        });
       }
     }
 
@@ -284,6 +306,7 @@ function VoiceRoomContent({
   }, []);
 
   const toggleVideo = useCallback(() => {
+    if (room.state !== ConnectionState.Connected) return;
     if (!isCameraEnabled) {
       // Fixed camera quality profile for predictable behavior.
       const defaultRes = "720p";
@@ -326,6 +349,10 @@ function VoiceRoomContent({
   }, []);
 
   const startScreenShare = useCallback(async (resolution: string, fps: number) => {
+    if (room.state !== ConnectionState.Connected) {
+      setIsScreenSharing(false);
+      return;
+    }
     try {
       // Clamp to server limits
       const clampedRes = clampResolution(resolution, mediaLimits.maxScreenShareResolution);
@@ -421,6 +448,7 @@ function VoiceRoomContent({
   useEffect(() => {
     if (!onVoiceControlsChange) return;
     onVoiceControlsChange({
+      isConnected,
       isMuted: manualMute,
       isDeafened: deafened,
       isCameraOn: isCameraEnabled ?? false,
@@ -444,6 +472,7 @@ function VoiceRoomContent({
       },
     });
   }, [
+    isConnected,
     manualMute,
     deafened,
     isCameraEnabled,
@@ -703,11 +732,11 @@ export default function VoiceChannel({ room, onParticipantsChange, onVoiceContro
     }
   }
 
-  function handleLeave() {
+  const handleLeave = useCallback(() => {
     setToken(null);
     onParticipantsChange?.(room.id, []);
     onVoiceControlsChange?.(null);
-  }
+  }, [onParticipantsChange, onVoiceControlsChange, room.id]);
 
   return (
     <div className="flex flex-col h-full">

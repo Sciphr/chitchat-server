@@ -170,7 +170,10 @@ export default function Sidebar({
         let audioIn = devices.filter((d) => d.kind === "audioinput");
         let audioOut = devices.filter((d) => d.kind === "audiooutput");
 
-        if ((audioIn.length <= 1 || audioOut.length <= 1) && navigator.mediaDevices?.getUserMedia) {
+        if (
+          (audioIn.length <= 1 || audioOut.length <= 1) &&
+          typeof navigator.mediaDevices?.getUserMedia === "function"
+        ) {
           await primeMediaPermissions();
           devices = await navigator.mediaDevices.enumerateDevices();
           audioIn = devices.filter((d) => d.kind === "audioinput");
@@ -551,10 +554,13 @@ export default function Sidebar({
       {/* Voice controls (when connected) */}
       {voiceControls && (
         <div className="sidebar-voice-controls">
-          <div className="sidebar-voice-controls-label">Voice Connected</div>
+          <div className="sidebar-voice-controls-label">
+            {voiceControls.isConnected ? "Voice Connected" : "Voice Connecting..."}
+          </div>
           <div className="sidebar-voice-controls-buttons">
             <button
               onClick={voiceControls.toggleMute}
+              disabled={!voiceControls.isConnected}
               className={`sidebar-vc-btn ${voiceControls.isMuted ? "active" : ""}`}
               title={voiceControls.isMuted ? "Unmute" : "Mute"}
             >
@@ -562,6 +568,7 @@ export default function Sidebar({
             </button>
             <button
               onClick={voiceControls.toggleDeafen}
+              disabled={!voiceControls.isConnected}
               className={`sidebar-vc-btn ${voiceControls.isDeafened ? "active" : ""}`}
               title={voiceControls.isDeafened ? "Undeafen" : "Deafen"}
             >
@@ -569,6 +576,7 @@ export default function Sidebar({
             </button>
             <button
               onClick={voiceControls.toggleVideo}
+              disabled={!voiceControls.isConnected}
               className={`sidebar-vc-btn ${voiceControls.isCameraOn ? "active" : ""}`}
               title={voiceControls.isCameraOn ? "Turn off camera" : "Turn on camera"}
             >
@@ -576,6 +584,7 @@ export default function Sidebar({
             </button>
             <button
               onClick={voiceControls.toggleNoiseSuppression}
+              disabled={!voiceControls.isConnected}
               className={`sidebar-vc-btn ${voiceControls.isNoiseSuppressionEnabled ? "active" : ""}`}
               title={
                 voiceControls.isNoiseSuppressionEnabled
@@ -588,6 +597,7 @@ export default function Sidebar({
             <div className="share-picker-anchor" ref={sharePickerRef}>
               <button
                 onClick={() => {
+                  if (!voiceControls.isConnected) return;
                   if (voiceControls.isScreenSharing) {
                     voiceControls.stopScreenShare();
                   } else if (showSharePicker) {
@@ -596,6 +606,7 @@ export default function Sidebar({
                     openSharePicker();
                   }
                 }}
+                disabled={!voiceControls.isConnected}
                 className={`sidebar-vc-btn ${voiceControls.isScreenSharing ? "active" : ""}`}
                 title={voiceControls.isScreenSharing ? "Stop sharing" : "Share screen"}
               >
@@ -633,6 +644,7 @@ export default function Sidebar({
                   </select>
                   <button
                     className="share-picker-start"
+                    disabled={!voiceControls.isConnected}
                     onClick={() => {
                       setShowSharePicker(false);
                       voiceControls.startScreenShare(shareRes, shareFps);
@@ -648,6 +660,7 @@ export default function Sidebar({
             <select
               className="sidebar-device-select"
               title="Microphone"
+              disabled={!voiceControls.isConnected}
               value={voiceControls.audioInputDeviceId}
               onChange={async (e) => {
                 try {
@@ -672,6 +685,7 @@ export default function Sidebar({
             <select
               className="sidebar-device-select"
               title="Speakers"
+              disabled={!voiceControls.isConnected}
               value={voiceControls.audioOutputDeviceId}
               onChange={async (e) => {
                 try {

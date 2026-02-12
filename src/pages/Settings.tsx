@@ -181,7 +181,7 @@ export default function Settings({ onClose }: SettingsProps) {
       if (
         !requestPermissions &&
         (audioIn.length <= 1 || audioOut.length <= 1) &&
-        navigator.mediaDevices?.getUserMedia
+        typeof navigator.mediaDevices?.getUserMedia === "function"
       ) {
         await primeMediaPermissions();
         devices = await navigator.mediaDevices.enumerateDevices();
@@ -264,6 +264,7 @@ export default function Settings({ onClose }: SettingsProps) {
     }
     window.history.back();
   }
+
 
   const content = (
     <div className="panel rounded-3xl profile-shell">

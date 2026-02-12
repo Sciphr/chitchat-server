@@ -529,7 +529,7 @@ export default function ChatRoom({
         )}
         <AnimatePresence initial={false}>
         {messages.map((msg, index) => {
-          const isOwnMessage = currentUserId && msg.user_id === currentUserId;
+          const isOwnMessage = Boolean(currentUserId && msg.user_id === currentUserId);
           const displayName = isOwnMessage ? currentUsername : msg.username;
           const displayAvatar = isOwnMessage ? currentAvatarUrl : msg.avatar_url;
           const pending = Boolean(msg.pending);
@@ -549,7 +549,7 @@ export default function ChatRoom({
                 animate={{ opacity: pending ? 0.7 : 1, y: 0 }}
                 exit={{ opacity: 0, x: -30, height: 0, marginTop: 0, marginBottom: 0, paddingTop: 0, paddingBottom: 0 }}
                 transition={{ duration: 0.25, ease: "easeOut" }}
-                className="flex items-start gap-4 group bg-[var(--bg-secondary)]/80 border border-[var(--border)] rounded-2xl px-5 py-4 shadow-[0_12px_30px_-22px_rgba(0,0,0,0.7)] chat-message"
+                className={`flex items-start gap-4 group bg-[var(--bg-secondary)]/80 border border-[var(--border)] rounded-2xl px-5 py-4 shadow-[0_12px_30px_-22px_rgba(0,0,0,0.7)] chat-message${isOwnMessage ? " own" : ""}`}
               >
                 <div className="w-10 h-10 rounded-xl bg-[var(--accent)] flex items-center justify-center text-white text-sm font-bold shrink-0 mt-0.5">
                   {displayAvatar ? (
@@ -568,7 +568,12 @@ export default function ChatRoom({
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline gap-2">
-                    <span className="font-semibold text-sm">{displayName}</span>
+                    <span className="font-semibold text-sm">
+                      {displayName}
+                    </span>
+                    {isOwnMessage && (
+                      <span className="chat-message-you-tag">You</span>
+                    )}
                     {pending && (
                       <span className="text-[10px] text-[var(--text-muted)]">
                         Sending...

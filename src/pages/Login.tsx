@@ -12,8 +12,14 @@ interface ServerInfo {
 
 export default function Login() {
   const navigate = useNavigate();
-  const { token, loading, signInWithPassword, signUp, serverUrl, setServerUrl } =
-    useAuth();
+  const {
+    token,
+    loading,
+    signInWithPassword,
+    signUp,
+    serverUrl,
+    setServerUrl,
+  } = useAuth();
 
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
@@ -94,7 +100,12 @@ export default function Login() {
         setSubmitting(false);
         return;
       }
-      result = await signUp(email, password, username.trim(), inviteCode || undefined);
+      result = await signUp(
+        email,
+        password,
+        username.trim(),
+        inviteCode || undefined,
+      );
     }
 
     if (result.error) {
@@ -105,10 +116,10 @@ export default function Login() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center flex-1 bg-[var(--bg-primary)]">
+      <div className="flex items-center justify-center flex-1 bg-(--bg-primary)">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
-          <span className="text-sm text-[var(--text-muted)]">Loading...</span>
+          <div className="w-8 h-8 border-2 border-(--accent) border-t-transparent rounded-full animate-spin" />
+          <span className="text-sm text-(--text-muted)">Loading...</span>
         </div>
       </div>
     );
@@ -125,21 +136,21 @@ export default function Login() {
       {/* Animated background orbs */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div
-          className="animate-float absolute -top-24 -left-24 w-[500px] h-[500px] rounded-full opacity-30"
+          className="animate-float absolute -top-24 -left-24 w-125 h-125 rounded-full opacity-30"
           style={{
             background:
               "radial-gradient(circle, rgba(124,106,255,0.12) 0%, transparent 70%)",
           }}
         />
         <div
-          className="animate-float-delayed absolute -bottom-32 -right-32 w-[600px] h-[600px] rounded-full opacity-25"
+          className="animate-float-delayed absolute -bottom-32 -right-32 w-150 h-150 rounded-full opacity-25"
           style={{
             background:
               "radial-gradient(circle, rgba(99,102,241,0.1) 0%, transparent 70%)",
           }}
         />
         <div
-          className="animate-float-slow absolute top-1/3 left-2/3 w-[300px] h-[300px] rounded-full opacity-20"
+          className="animate-float-slow absolute top-1/3 left-2/3 w-75 h-75 rounded-full opacity-20"
           style={{
             background:
               "radial-gradient(circle, rgba(139,92,246,0.15) 0%, transparent 70%)",
@@ -156,7 +167,7 @@ export default function Login() {
         />
       </div>
 
-      <div className="relative z-10 w-full max-w-[420px] mx-4 animate-fade-up">
+      <div className="relative z-10 w-full max-w-105 mx-4 animate-fade-up">
         {/* Logo & branding */}
         <div className="text-center mb-10">
           <div
@@ -197,7 +208,7 @@ export default function Login() {
           <h1 className="text-[28px] font-bold text-white tracking-tight">
             {mode === "login" ? "Welcome back" : "Create an account"}
           </h1>
-          <p className="mt-1.5 text-sm text-[var(--text-muted)]">
+          <p className="mt-1.5 text-sm text-(--text-muted)">
             {mode === "login"
               ? "Sign in to continue to ChitChat"
               : "Get started with ChitChat"}
@@ -252,7 +263,7 @@ export default function Login() {
             <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
               {/* Server address */}
               <div>
-                <label className="block mb-1.5 text-[12px] font-medium text-[var(--text-secondary)]">
+                <label className="block mb-1.5 text-[12px] font-medium text-(--text-secondary)">
                   Server Address
                 </label>
                 <input
@@ -264,17 +275,21 @@ export default function Login() {
                   className="login-input"
                 />
                 {fetchingInfo && (
-                  <p className="mt-1 text-[11px] text-[var(--text-muted)]">Connecting...</p>
+                  <p className="mt-1 text-[11px] text-(--text-muted)">
+                    Connecting...
+                  </p>
                 )}
                 {serverInfo && !fetchingInfo && (
-                  <p className="mt-1 text-[11px] text-[var(--accent)]">{serverInfo.name}</p>
+                  <p className="mt-1 text-[11px] text-(--accent)">
+                    {serverInfo.name}
+                  </p>
                 )}
               </div>
 
               {mode === "register" && (
                 <>
                   <div>
-                    <label className="block mb-1.5 text-[12px] font-medium text-[var(--text-secondary)]">
+                    <label className="block mb-1.5 text-[12px] font-medium text-(--text-secondary)">
                       Username
                     </label>
                     <input
@@ -287,7 +302,7 @@ export default function Login() {
                   </div>
                   {serverInfo?.inviteOnly && (
                     <div>
-                      <label className="block mb-1.5 text-[12px] font-medium text-[var(--text-secondary)]">
+                      <label className="block mb-1.5 text-[12px] font-medium text-(--text-secondary)">
                         Invite Code
                       </label>
                       <input
@@ -303,7 +318,7 @@ export default function Login() {
               )}
 
               <div>
-                <label className="block mb-1.5 text-[12px] font-medium text-[var(--text-secondary)]">
+                <label className="block mb-1.5 text-[12px] font-medium text-(--text-secondary)">
                   Email
                 </label>
                 <input
@@ -316,7 +331,7 @@ export default function Login() {
               </div>
 
               <div>
-                <label className="block mb-1.5 text-[12px] font-medium text-[var(--text-secondary)]">
+                <label className="block mb-1.5 text-[12px] font-medium text-(--text-secondary)">
                   Password
                 </label>
                 <input
@@ -368,7 +383,14 @@ export default function Login() {
           </form>
 
           {/* Toggle login/register */}
-          <p style={{ marginTop: 24, textAlign: "center", fontSize: 13, color: "var(--text-muted)" }}>
+          <p
+            style={{
+              marginTop: 24,
+              textAlign: "center",
+              fontSize: 13,
+              color: "var(--text-muted)",
+            }}
+          >
             {mode === "login" ? (
               serverInfo?.registrationOpen !== false ? (
                 <>
@@ -379,7 +401,7 @@ export default function Login() {
                       setMode("register");
                       setError("");
                     }}
-                    className="text-[var(--accent)] font-medium hover:text-white cursor-pointer transition-colors"
+                    className="text-(--accent) font-medium hover:text-white cursor-pointer transition-colors"
                   >
                     Sign up
                   </button>
@@ -396,7 +418,7 @@ export default function Login() {
                     setMode("login");
                     setError("");
                   }}
-                  className="text-[var(--accent)] font-medium hover:text-white cursor-pointer transition-colors"
+                  className="text-(--accent) font-medium hover:text-white cursor-pointer transition-colors"
                 >
                   Sign in
                 </button>
@@ -406,7 +428,7 @@ export default function Login() {
         </div>
 
         {/* Footer */}
-        <p className="mt-8 text-center text-[11px] tracking-wide text-[var(--text-muted)] opacity-50">
+        <p className="mt-8 text-center text-[11px] tracking-wide text-(--text-muted) opacity-50">
           Self-hosted chat &middot; Your data, your server
         </p>
       </div>
