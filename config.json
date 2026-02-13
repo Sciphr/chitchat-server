@@ -43,6 +43,7 @@
     "jacobtberry@proton.me"
   ],
   "livekit": {
+    "url": "",
     "apiKey": "devkey",
     "apiSecret": "secret",
     "maxScreenShareResolution": "4k",

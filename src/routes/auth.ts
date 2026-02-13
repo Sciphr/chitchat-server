@@ -92,7 +92,7 @@ router.post("/register", (req, res) => {
   const isAdmin = config.adminEmails.includes(email);
 
   db.prepare(
-    "INSERT INTO users (id, username, email, password_hash, status) VALUES (?, ?, ?, ?, 'online')"
+    "INSERT INTO users (id, username, email, password_hash, status, activity_game) VALUES (?, ?, ?, ?, 'online', NULL)"
   ).run(id, username, email, passwordHash);
 
   const token = generateToken({ userId: id, username, email, isAdmin });
@@ -134,7 +134,7 @@ router.post("/login", (req, res) => {
   }
 
   // Set user online on login
-  db.prepare("UPDATE users SET status = 'online' WHERE id = ?").run(user.id);
+  db.prepare("UPDATE users SET status = 'online', activity_game = NULL WHERE id = ?").run(user.id);
 
   const token = generateToken({
     userId: user.id,
@@ -157,6 +157,7 @@ router.get("/me", requireAuth, (req, res) => {
   const profile = db
     .prepare(
       `SELECT id, username, email, avatar_url, about, status,
+              activity_game,
               push_to_talk_enabled, push_to_talk_key,
               audio_input_id, video_input_id, audio_output_id,
               created_at, updated_at
@@ -214,6 +215,7 @@ router.put("/profile", requireAuth, (req, res) => {
   const profile = db
     .prepare(
       `SELECT id, username, email, avatar_url, about, status,
+              activity_game,
               push_to_talk_enabled, push_to_talk_key,
               audio_input_id, video_input_id, audio_output_id,
               created_at, updated_at

@@ -12,6 +12,7 @@ router.get("/info", (_req, res) => {
     registrationOpen: config.registration.open,
     inviteOnly: config.registration.inviteOnly,
     maintenanceMode: config.maintenanceMode,
+    userCanCreateRooms: config.rooms.userCanCreate,
     livekitUrl: config.livekit.url || "",
     mediaLimits: {
       maxScreenShareResolution: config.livekit.maxScreenShareResolution,

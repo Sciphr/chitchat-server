@@ -11,6 +11,8 @@ interface ConnectedUser {
   avatarUrl?: string;
 }
 
+type NotificationMode = "all" | "mentions" | "mute";
+
 const connectedUsers = new Map<string, ConnectedUser>();
 const pendingOfflineTimers = new Map<string, NodeJS.Timeout>();
 
@@ -23,7 +25,7 @@ function broadcastPresence(io: Server) {
   const db = getDb();
   const users = db
     .prepare(
-      "SELECT id, username, avatar_url, status, about FROM users ORDER BY username COLLATE NOCASE ASC"
+      "SELECT id, username, avatar_url, status, about, activity_game FROM users ORDER BY username COLLATE NOCASE ASC"
     )
     .all();
   io.emit("users:list", users);
@@ -73,6 +75,18 @@ type AttachmentRow = {
   message_id: string;
 };
 
+type ReactionRow = {
+  message_id: string;
+  emoji: string;
+  user_id: string;
+};
+
+type MessageReactionPayload = {
+  emoji: string;
+  count: number;
+  user_ids: string[];
+};
+
 function withAttachments(db: ReturnType<typeof getDb>, rows: MessageRow[]) {
   if (!rows.length) return rows;
 
@@ -106,6 +120,209 @@ function withAttachments(db: ReturnType<typeof getDb>, rows: MessageRow[]) {
     ...row,
     attachments: byMessageId.get(row.id) ?? [],
   }));
+}
+
+function withReactions(db: ReturnType<typeof getDb>, rows: MessageRow[]) {
+  if (!rows.length) {
+    return rows.map((row) => ({ ...row, reactions: [] as MessageReactionPayload[] }));
+  }
+
+  const byMessageId = new Map<string, Map<string, Set<string>>>();
+  const placeholders = rows.map(() => "?").join(", ");
+  const reactionRows = db
+    .prepare(
+      `SELECT message_id, emoji, user_id
+       FROM message_reactions
+       WHERE message_id IN (${placeholders})
+       ORDER BY created_at ASC`
+    )
+    .all(...rows.map((row) => row.id)) as ReactionRow[];
+
+  for (const reaction of reactionRows) {
+    if (!byMessageId.has(reaction.message_id)) {
+      byMessageId.set(reaction.message_id, new Map<string, Set<string>>());
+    }
+    const byEmoji = byMessageId.get(reaction.message_id)!;
+    if (!byEmoji.has(reaction.emoji)) {
+      byEmoji.set(reaction.emoji, new Set<string>());
+    }
+    byEmoji.get(reaction.emoji)!.add(reaction.user_id);
+  }
+
+  return rows.map((row) => {
+    const byEmoji = byMessageId.get(row.id);
+    const reactions: MessageReactionPayload[] = [];
+    if (byEmoji) {
+      for (const [emoji, userIds] of byEmoji.entries()) {
+        const ids = Array.from(userIds);
+        reactions.push({
+          emoji,
+          count: ids.length,
+          user_ids: ids,
+        });
+      }
+      reactions.sort((a, b) => b.count - a.count || a.emoji.localeCompare(b.emoji));
+    }
+    return {
+      ...row,
+      reactions,
+    };
+  });
+}
+
+function canAccessRoom(db: ReturnType<typeof getDb>, roomId: string, userId: string): boolean {
+  const room = db
+    .prepare("SELECT type, is_temporary FROM rooms WHERE id = ?")
+    .get(roomId) as { type: "text" | "voice" | "dm"; is_temporary: number } | undefined;
+  if (!room) return false;
+  if (room.type !== "dm" && room.is_temporary !== 1) return true;
+  const membership = db
+    .prepare("SELECT 1 FROM room_members WHERE room_id = ? AND user_id = ?")
+    .get(roomId, userId);
+  return Boolean(membership);
+}
+
+type RoomCategoryRow = {
+  id: string;
+  name: string;
+  position: number;
+  enforce_type_order: number;
+  created_at: string;
+};
+
+type RoomLayoutRow = {
+  id: string;
+  name: string;
+  type: "text" | "voice" | "dm";
+  created_by: string;
+  created_at: string;
+  category_id: string | null;
+  position: number;
+  is_temporary: number;
+  owner_user_id: string | null;
+};
+
+function ensureDefaultCategory(db: ReturnType<typeof getDb>) {
+  db.prepare(
+    "INSERT OR IGNORE INTO room_categories (id, name, position, enforce_type_order) VALUES ('default', 'Channels', 0, 1)"
+  ).run();
+}
+
+function getRoomCategories(db: ReturnType<typeof getDb>): RoomCategoryRow[] {
+  ensureDefaultCategory(db);
+  return db
+    .prepare(
+      `SELECT id, name, position, enforce_type_order, created_at
+       FROM room_categories
+       ORDER BY position ASC, created_at ASC`
+    )
+    .all() as RoomCategoryRow[];
+}
+
+function getStructuredRooms(db: ReturnType<typeof getDb>): RoomLayoutRow[] {
+  ensureDefaultCategory(db);
+  db.prepare(
+    "UPDATE rooms SET category_id = 'default' WHERE type != 'dm' AND is_temporary = 0 AND (category_id IS NULL OR category_id = '')"
+  ).run();
+  return db
+    .prepare(
+      `SELECT id, name, type, created_by, created_at, category_id, position, is_temporary, owner_user_id
+       FROM rooms
+       WHERE type != 'dm' AND is_temporary = 0
+       ORDER BY category_id ASC, position ASC, created_at ASC`
+    )
+    .all() as RoomLayoutRow[];
+}
+
+type CallRoomRow = {
+  id: string;
+  name: string;
+  type: "voice";
+  created_by: string;
+  created_at: string;
+  category_id: string | null;
+  position: number;
+  is_temporary: number;
+  owner_user_id: string | null;
+};
+
+function getCallRoomById(db: ReturnType<typeof getDb>, roomId: string): CallRoomRow | undefined {
+  return db
+    .prepare(
+      `SELECT id, name, type, created_by, created_at, category_id, position, is_temporary, owner_user_id
+       FROM rooms
+       WHERE id = ? AND type = 'voice' AND is_temporary = 1`
+    )
+    .get(roomId) as CallRoomRow | undefined;
+}
+
+function getCallParticipantIds(db: ReturnType<typeof getDb>, roomId: string): string[] {
+  const rows = db
+    .prepare(
+      "SELECT user_id FROM room_members WHERE room_id = ? ORDER BY joined_at ASC"
+    )
+    .all(roomId) as Array<{ user_id: string }>;
+  return rows.map((row) => row.user_id);
+}
+
+function emitCallState(io: Server, db: ReturnType<typeof getDb>, roomId: string) {
+  const callRoom = getCallRoomById(db, roomId);
+  if (!callRoom) return;
+  const participantIds = getCallParticipantIds(db, roomId);
+  for (const [sid, cu] of connectedUsers.entries()) {
+    if (participantIds.includes(cu.userId)) {
+      io.to(sid).emit("call:state", {
+        room: callRoom,
+        ownerUserId: callRoom.owner_user_id,
+        participantIds,
+      });
+    }
+  }
+}
+
+function emitRoomStructure(io: Server, db: ReturnType<typeof getDb>) {
+  const categories = getRoomCategories(db);
+  const rooms = getStructuredRooms(db);
+  io.emit("rooms:structure", { categories, rooms });
+  io.emit("rooms:list", rooms);
+}
+
+function getInsertPosition(
+  db: ReturnType<typeof getDb>,
+  categoryId: string,
+  roomType: "text" | "voice",
+): number {
+  ensureDefaultCategory(db);
+  const category = db
+    .prepare(
+      "SELECT enforce_type_order FROM room_categories WHERE id = ?"
+    )
+    .get(categoryId) as { enforce_type_order: number } | undefined;
+  const enforceTypeOrder = (category?.enforce_type_order ?? 1) === 1;
+
+  const rows = db
+    .prepare(
+      `SELECT id, type, position
+       FROM rooms
+       WHERE type != 'dm' AND is_temporary = 0 AND category_id = ?
+       ORDER BY position ASC, created_at ASC`
+    )
+    .all(categoryId) as Array<{ id: string; type: "text" | "voice"; position: number }>;
+
+  if (rows.length === 0) return 0;
+  if (!enforceTypeOrder || roomType === "voice") {
+    return rows[rows.length - 1].position + 1;
+  }
+
+  const firstVoice = rows.find((row) => row.type === "voice");
+  if (!firstVoice) {
+    return rows[rows.length - 1].position + 1;
+  }
+
+  db.prepare(
+    "UPDATE rooms SET position = position + 1 WHERE type != 'dm' AND is_temporary = 0 AND category_id = ? AND position >= ?"
+  ).run(categoryId, firstVoice.position);
+  return firstVoice.position;
 }
 
 export function setupSocketHandlers(io: Server) {
@@ -143,7 +360,7 @@ export function setupSocketHandlers(io: Server) {
 
     // Update user status to online
     const db = getDb();
-    db.prepare("UPDATE users SET status = 'online' WHERE id = ?").run(
+    db.prepare("UPDATE users SET status = 'online', activity_game = NULL WHERE id = ?").run(
       jwtUser.userId
     );
     broadcastPresence(io);
@@ -183,20 +400,38 @@ export function setupSocketHandlers(io: Server) {
       }
     );
 
+    socket.on("user:activity", ({ game }: { game?: string | null }) => {
+      const normalized =
+        typeof game === "string" && game.trim().length > 0
+          ? game.trim().slice(0, 80)
+          : null;
+      db.prepare("UPDATE users SET activity_game = ? WHERE id = ?").run(
+        normalized,
+        jwtUser.userId
+      );
+      broadcastPresence(io);
+    });
+
     // Get rooms list (excludes DM rooms)
     socket.on("rooms:get", () => {
-      const rooms = db
-        .prepare(
-          "SELECT * FROM rooms WHERE type != 'dm' ORDER BY created_at ASC"
-        )
-        .all();
+      const categories = getRoomCategories(db);
+      const rooms = getStructuredRooms(db);
+      socket.emit("rooms:structure", { categories, rooms });
       socket.emit("rooms:list", rooms);
     });
 
     // Create a room
     socket.on(
       "room:create",
-      ({ name, type }: { name: string; type: "text" | "voice" }) => {
+      ({
+        name,
+        type,
+        categoryId,
+      }: {
+        name: string;
+        type: "text" | "voice";
+        categoryId?: string;
+      }) => {
         const config = getConfig();
         if (!config.rooms.userCanCreate && !jwtUser.isAdmin) {
           socket.emit("error", {
@@ -207,22 +442,192 @@ export function setupSocketHandlers(io: Server) {
 
         const user = connectedUsers.get(socket.id);
         const id = crypto.randomUUID();
+        const targetCategoryId =
+          (typeof categoryId === "string" && categoryId.trim()) || "default";
+        const categoryExists = db
+          .prepare("SELECT id FROM room_categories WHERE id = ?")
+          .get(targetCategoryId) as { id: string } | undefined;
+        const safeCategoryId = categoryExists?.id || "default";
+        const insertPosition = getInsertPosition(db, safeCategoryId, type);
 
         db.prepare(
-          "INSERT INTO rooms (id, name, type, created_by) VALUES (?, ?, ?, ?)"
-        ).run(id, name, type, user?.username || "anonymous");
+          "INSERT INTO rooms (id, name, type, created_by, category_id, position) VALUES (?, ?, ?, ?, ?, ?)"
+        ).run(
+          id,
+          name,
+          type,
+          user?.username || "anonymous",
+          safeCategoryId,
+          insertPosition
+        );
 
-        const rooms = db
+        emitRoomStructure(io, db);
+      }
+    );
+
+    socket.on(
+      "category:create",
+      (
+        { name }: { name: string },
+        ack?: (payload: { ok: boolean; error?: string; category?: RoomCategoryRow }) => void
+      ) => {
+        if (!jwtUser.isAdmin) {
+          if (ack) ack({ ok: false, error: "Only admins can create categories" });
+          return;
+        }
+        const trimmed = (name || "").trim();
+        if (!trimmed) {
+          if (ack) ack({ ok: false, error: "Category name is required" });
+          return;
+        }
+        const id = crypto.randomUUID();
+        const maxPos = db
+          .prepare("SELECT COALESCE(MAX(position), -1) AS maxPos FROM room_categories")
+          .get() as { maxPos: number };
+        const position = (maxPos?.maxPos ?? -1) + 1;
+        db.prepare(
+          "INSERT INTO room_categories (id, name, position, enforce_type_order) VALUES (?, ?, ?, 1)"
+        ).run(id, trimmed, position);
+        const category = db
           .prepare(
-            "SELECT * FROM rooms WHERE type != 'dm' ORDER BY created_at ASC"
+            "SELECT id, name, position, enforce_type_order, created_at FROM room_categories WHERE id = ?"
           )
-          .all();
-        io.emit("rooms:list", rooms);
+          .get(id) as RoomCategoryRow;
+        emitRoomStructure(io, db);
+        if (ack) ack({ ok: true, category });
+      }
+    );
+
+    socket.on(
+      "room:rename",
+      (
+        { roomId, name }: { roomId: string; name: string },
+        ack?: (payload: { ok: boolean; error?: string }) => void
+      ) => {
+        if (!jwtUser.isAdmin) {
+          if (ack) ack({ ok: false, error: "Only admins can rename channels" });
+          return;
+        }
+        const trimmed = (name || "").trim();
+        if (!roomId || !trimmed) {
+          if (ack) ack({ ok: false, error: "Channel name is required" });
+          return;
+        }
+        const room = db
+          .prepare("SELECT id, type FROM rooms WHERE id = ?")
+          .get(roomId) as { id: string; type: "text" | "voice" | "dm" } | undefined;
+        if (!room || room.type === "dm") {
+          if (ack) ack({ ok: false, error: "Channel not found" });
+          return;
+        }
+        db.prepare("UPDATE rooms SET name = ? WHERE id = ?").run(trimmed, roomId);
+        emitRoomStructure(io, db);
+        if (ack) ack({ ok: true });
+      }
+    );
+
+    socket.on(
+      "category:rename",
+      (
+        { categoryId, name }: { categoryId: string; name: string },
+        ack?: (payload: { ok: boolean; error?: string }) => void
+      ) => {
+        if (!jwtUser.isAdmin) {
+          if (ack) ack({ ok: false, error: "Only admins can rename categories" });
+          return;
+        }
+        const trimmed = (name || "").trim();
+        if (!categoryId || !trimmed) {
+          if (ack) ack({ ok: false, error: "Category name is required" });
+          return;
+        }
+        const category = db
+          .prepare("SELECT id FROM room_categories WHERE id = ?")
+          .get(categoryId) as { id: string } | undefined;
+        if (!category) {
+          if (ack) ack({ ok: false, error: "Category not found" });
+          return;
+        }
+        db.prepare("UPDATE room_categories SET name = ? WHERE id = ?").run(trimmed, categoryId);
+        emitRoomStructure(io, db);
+        if (ack) ack({ ok: true });
+      }
+    );
+
+    socket.on(
+      "layout:update",
+      (
+        {
+          categories,
+          rooms,
+        }: {
+          categories: Array<{ id: string; position: number; enforceTypeOrder: boolean }>;
+          rooms: Array<{ id: string; categoryId: string; position: number }>;
+        },
+        ack?: (payload: { ok: boolean; error?: string }) => void
+      ) => {
+        if (!jwtUser.isAdmin) {
+          if (ack) ack({ ok: false, error: "Only admins can reorder channels" });
+          return;
+        }
+        try {
+          const knownCategoryIds = new Set(
+            (
+              db.prepare("SELECT id FROM room_categories").all() as Array<{ id: string }>
+            ).map((row) => row.id)
+          );
+          const knownRoomIds = new Set(
+            (
+              db
+                .prepare("SELECT id FROM rooms WHERE type != 'dm' AND is_temporary = 0")
+                .all() as Array<{ id: string }>
+            ).map((row) => row.id)
+          );
+
+          const txn = db.transaction(() => {
+            for (const category of categories || []) {
+              if (!knownCategoryIds.has(category.id)) continue;
+              db.prepare(
+                "UPDATE room_categories SET position = ?, enforce_type_order = ? WHERE id = ?"
+              ).run(
+                category.position,
+                category.enforceTypeOrder ? 1 : 0,
+                category.id
+              );
+            }
+
+            for (const room of rooms || []) {
+              if (!knownRoomIds.has(room.id)) continue;
+              if (!knownCategoryIds.has(room.categoryId)) continue;
+              db.prepare(
+                "UPDATE rooms SET category_id = ?, position = ? WHERE id = ? AND type != 'dm' AND is_temporary = 0"
+              ).run(room.categoryId, room.position, room.id);
+            }
+          });
+          txn();
+          emitRoomStructure(io, db);
+          if (ack) ack({ ok: true });
+        } catch (err) {
+          const error =
+            err instanceof Error ? err.message : "Failed to update layout";
+          if (ack) ack({ ok: false, error });
+        }
       }
     );
 
     // Join a room
     socket.on("room:join", (roomId: string) => {
+      const roomMeta = db
+        .prepare("SELECT type, is_temporary FROM rooms WHERE id = ?")
+        .get(roomId) as { type: "text" | "voice" | "dm"; is_temporary: number } | undefined;
+      if (!roomMeta) return;
+      if (roomMeta.type === "dm" || roomMeta.is_temporary === 1) {
+        const membership = db
+          .prepare("SELECT 1 FROM room_members WHERE room_id = ? AND user_id = ?")
+          .get(roomId, jwtUser.userId);
+        if (!membership) return;
+      }
+
       socket.join(roomId);
 
       const config = getConfig();
@@ -242,15 +647,13 @@ export function setupSocketHandlers(io: Server) {
         .all(roomId, config.messageHistoryLimit) as MessageRow[];
 
       const messagesWithAttachments = withAttachments(db, messages);
+      const messagesWithMeta = withReactions(db, messagesWithAttachments as MessageRow[]);
 
       const hasMore = messages.length >= config.messageHistoryLimit;
-      socket.emit("message:history", { messages: messagesWithAttachments, hasMore });
+      socket.emit("message:history", { messages: messagesWithMeta, hasMore });
 
       // Send MOTD as a system message if configured (only for non-DM rooms)
-      const room = db
-        .prepare("SELECT type FROM rooms WHERE id = ?")
-        .get(roomId) as { type: string } | undefined;
-      if (config.motd && room?.type !== "dm") {
+      if (config.motd && roomMeta.type !== "dm") {
         socket.emit("message:system", { content: config.motd });
       }
     });
@@ -288,7 +691,8 @@ export function setupSocketHandlers(io: Server) {
           db,
           messages as MessageRow[]
         );
-        if (ack) ack({ messages: messagesWithAttachments, hasMore });
+        const messagesWithMeta = withReactions(db, messagesWithAttachments as MessageRow[]);
+        if (ack) ack({ messages: messagesWithMeta, hasMore });
       }
     );
 
@@ -436,8 +840,11 @@ export function setupSocketHandlers(io: Server) {
           const payloadWithAttachments = withAttachments(db, [
             payload as MessageRow,
           ])[0] as Record<string, unknown>;
+          const payloadWithMeta = withReactions(db, [
+            payloadWithAttachments as MessageRow,
+          ])[0] as Record<string, unknown>;
 
-          io.to(room_id).emit("message:new", payloadWithAttachments);
+          io.to(room_id).emit("message:new", payloadWithMeta);
 
           // Room metadata (used for direct DM delivery and unread notifications)
           const roomInfo = db
@@ -456,14 +863,14 @@ export function setupSocketHandlers(io: Server) {
             if (otherMember) {
               for (const [sid, cu] of connectedUsers.entries()) {
                 if (cu.userId === otherMember.user_id) {
-                  io.to(sid).emit("message:notify", payloadWithAttachments);
+                  io.to(sid).emit("message:notify", payloadWithMeta);
                 }
               }
             }
           } else {
             for (const [sid, cu] of connectedUsers.entries()) {
               if (cu.userId !== userId) {
-                io.to(sid).emit("message:notify", payloadWithAttachments);
+                io.to(sid).emit("message:notify", payloadWithMeta);
               }
             }
           }
@@ -482,7 +889,7 @@ export function setupSocketHandlers(io: Server) {
                   const otherSocket = io.sockets.sockets.get(sid);
                   // Only send if they haven't already joined this room
                   if (otherSocket && !otherSocket.rooms.has(room_id)) {
-                    otherSocket.emit("message:new", payloadWithAttachments);
+                    otherSocket.emit("message:new", payloadWithMeta);
                   }
                 }
               }
@@ -490,7 +897,7 @@ export function setupSocketHandlers(io: Server) {
           }
 
           if (ack) {
-            ack({ ok: true, message: payloadWithAttachments, client_nonce });
+            ack({ ok: true, message: payloadWithMeta, client_nonce });
           }
         } catch (err) {
           const errorMessage =
@@ -499,6 +906,72 @@ export function setupSocketHandlers(io: Server) {
           if (ack) {
             ack({ ok: false, error: errorMessage, client_nonce });
           }
+        }
+      }
+    );
+
+    socket.on(
+      "message:reaction:set",
+      (
+        {
+          messageId,
+          emoji,
+          active,
+        }: { messageId: string; emoji: string; active: boolean },
+        ack?: (payload: { ok: boolean; error?: string }) => void
+      ) => {
+        const normalizedEmoji = (emoji || "").trim();
+        if (!messageId || !normalizedEmoji || normalizedEmoji.length > 64) {
+          if (ack) ack({ ok: false, error: "Invalid reaction payload" });
+          return;
+        }
+
+        const message = db
+          .prepare("SELECT id, room_id FROM messages WHERE id = ?")
+          .get(messageId) as { id: string; room_id: string } | undefined;
+        if (!message) {
+          if (ack) ack({ ok: false, error: "Message not found" });
+          return;
+        }
+
+        if (!canAccessRoom(db, message.room_id, jwtUser.userId)) {
+          if (ack) ack({ ok: false, error: "Not authorized for this room" });
+          return;
+        }
+
+        try {
+          if (active) {
+            db.prepare(
+              `INSERT OR IGNORE INTO message_reactions (message_id, user_id, emoji, created_at)
+               VALUES (?, ?, ?, datetime('now'))`
+            ).run(messageId, jwtUser.userId, normalizedEmoji);
+          } else {
+            db.prepare(
+              "DELETE FROM message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?"
+            ).run(messageId, jwtUser.userId, normalizedEmoji);
+          }
+
+          const reactionRows = withReactions(db, [
+            {
+              id: messageId,
+              room_id: message.room_id,
+              user_id: "",
+              content: "",
+              created_at: "",
+            } as MessageRow,
+          ]);
+          const reactions = (reactionRows[0] as MessageRow & { reactions?: MessageReactionPayload[] })
+            .reactions ?? [];
+
+          io.to(message.room_id).emit("message:reaction:update", {
+            room_id: message.room_id,
+            messageId,
+            reactions,
+          });
+          if (ack) ack({ ok: true });
+        } catch (err) {
+          const error = err instanceof Error ? err.message : "Failed to update reaction";
+          if (ack) ack({ ok: false, error });
         }
       }
     );
@@ -644,10 +1117,269 @@ export function setupSocketHandlers(io: Server) {
       socket.emit("dm:list", dmRooms);
     });
 
+    socket.on(
+      "call:start",
+      (
+        { targetUserId }: { targetUserId: string },
+        ack?: (payload: { ok: boolean; error?: string; room?: CallRoomRow }) => void
+      ) => {
+        const ownerUserId = jwtUser.userId;
+        if (!targetUserId || targetUserId === ownerUserId) {
+          if (ack) ack({ ok: false, error: "Invalid call target" });
+          return;
+        }
+        const targetUser = db
+          .prepare("SELECT id FROM users WHERE id = ?")
+          .get(targetUserId) as { id: string } | undefined;
+        if (!targetUser) {
+          if (ack) ack({ ok: false, error: "User not found" });
+          return;
+        }
+
+        const roomId = crypto.randomUUID();
+        const roomName = `Call-${roomId.slice(0, 6)}`;
+        const createdBy = connectedUsers.get(socket.id)?.username || jwtUser.username;
+        db.prepare(
+          `INSERT INTO rooms (id, name, type, created_by, category_id, position, is_temporary, owner_user_id)
+           VALUES (?, ?, 'voice', ?, NULL, 0, 1, ?)`
+        ).run(roomId, roomName, createdBy, ownerUserId);
+        db.prepare("INSERT INTO room_members (room_id, user_id) VALUES (?, ?)").run(roomId, ownerUserId);
+        db.prepare("INSERT INTO room_members (room_id, user_id) VALUES (?, ?)").run(roomId, targetUserId);
+
+        const room = getCallRoomById(db, roomId);
+        if (!room) {
+          if (ack) ack({ ok: false, error: "Failed to create call room" });
+          return;
+        }
+        emitCallState(io, db, roomId);
+        if (ack) ack({ ok: true, room });
+      }
+    );
+
+    socket.on(
+      "call:addParticipant",
+      (
+        { roomId, userId }: { roomId: string; userId: string },
+        ack?: (payload: { ok: boolean; error?: string }) => void
+      ) => {
+        const callRoom = getCallRoomById(db, roomId);
+        if (!callRoom) {
+          if (ack) ack({ ok: false, error: "Call not found" });
+          return;
+        }
+        if (callRoom.owner_user_id !== jwtUser.userId) {
+          if (ack) ack({ ok: false, error: "Only call owner can add participants" });
+          return;
+        }
+        if (!userId) {
+          if (ack) ack({ ok: false, error: "User is required" });
+          return;
+        }
+        db.prepare(
+          "INSERT OR IGNORE INTO room_members (room_id, user_id) VALUES (?, ?)"
+        ).run(roomId, userId);
+        emitCallState(io, db, roomId);
+        if (ack) ack({ ok: true });
+      }
+    );
+
+    socket.on(
+      "call:removeParticipant",
+      (
+        { roomId, userId }: { roomId: string; userId: string },
+        ack?: (payload: { ok: boolean; error?: string }) => void
+      ) => {
+        const callRoom = getCallRoomById(db, roomId);
+        if (!callRoom) {
+          if (ack) ack({ ok: false, error: "Call not found" });
+          return;
+        }
+        if (callRoom.owner_user_id !== jwtUser.userId) {
+          if (ack) ack({ ok: false, error: "Only call owner can remove participants" });
+          return;
+        }
+        if (!userId || userId === callRoom.owner_user_id) {
+          if (ack) ack({ ok: false, error: "Invalid participant" });
+          return;
+        }
+        db.prepare("DELETE FROM room_members WHERE room_id = ? AND user_id = ?").run(roomId, userId);
+        for (const [sid, cu] of connectedUsers.entries()) {
+          if (cu.userId === userId) {
+            io.to(sid).emit("call:removed", { roomId, byUserId: jwtUser.userId });
+            const targetSocket = io.sockets.sockets.get(sid);
+            targetSocket?.leave(roomId);
+          }
+        }
+        emitCallState(io, db, roomId);
+        if (ack) ack({ ok: true });
+      }
+    );
+
+    socket.on(
+      "call:leave",
+      (
+        { roomId }: { roomId: string },
+        ack?: (payload: { ok: boolean; error?: string }) => void
+      ) => {
+        const callRoom = getCallRoomById(db, roomId);
+        if (!callRoom) {
+          if (ack) ack({ ok: false, error: "Call not found" });
+          return;
+        }
+        if (callRoom.owner_user_id === jwtUser.userId) {
+          const participantIds = getCallParticipantIds(db, roomId);
+          db.prepare("DELETE FROM rooms WHERE id = ?").run(roomId);
+          for (const [sid, cu] of connectedUsers.entries()) {
+            if (participantIds.includes(cu.userId)) {
+              io.to(sid).emit("call:ended", { roomId, endedBy: jwtUser.userId });
+              io.sockets.sockets.get(sid)?.leave(roomId);
+            }
+          }
+          if (ack) ack({ ok: true });
+          return;
+        }
+        db.prepare("DELETE FROM room_members WHERE room_id = ? AND user_id = ?").run(roomId, jwtUser.userId);
+        socket.leave(roomId);
+        emitCallState(io, db, roomId);
+        if (ack) ack({ ok: true });
+      }
+    );
+
+    socket.on(
+      "call:end",
+      (
+        { roomId }: { roomId: string },
+        ack?: (payload: { ok: boolean; error?: string }) => void
+      ) => {
+        const callRoom = getCallRoomById(db, roomId);
+        if (!callRoom) {
+          if (ack) ack({ ok: false, error: "Call not found" });
+          return;
+        }
+        if (callRoom.owner_user_id !== jwtUser.userId) {
+          if (ack) ack({ ok: false, error: "Only call owner can end call" });
+          return;
+        }
+        const participantIds = getCallParticipantIds(db, roomId);
+        db.prepare("DELETE FROM rooms WHERE id = ?").run(roomId);
+        for (const [sid, cu] of connectedUsers.entries()) {
+          if (participantIds.includes(cu.userId)) {
+            io.to(sid).emit("call:ended", { roomId, endedBy: jwtUser.userId });
+            io.sockets.sockets.get(sid)?.leave(roomId);
+          }
+        }
+        if (ack) ack({ ok: true });
+      }
+    );
+
+    socket.on(
+      "notifications:get",
+      (
+        ack?: (payload: {
+          ok: boolean;
+          modes?: Record<string, NotificationMode>;
+          error?: string;
+        }) => void
+      ) => {
+        try {
+          const rows = db
+            .prepare(
+              `SELECT room_id, mode
+               FROM user_room_notification_prefs
+               WHERE user_id = ?`
+            )
+            .all(jwtUser.userId) as Array<{ room_id: string; mode: NotificationMode }>;
+          const modes: Record<string, NotificationMode> = {};
+          for (const row of rows) {
+            modes[row.room_id] = row.mode;
+          }
+          if (ack) ack({ ok: true, modes });
+        } catch (err) {
+          const error = err instanceof Error ? err.message : "Failed to load notification settings";
+          if (ack) ack({ ok: false, error });
+        }
+      }
+    );
+
+    socket.on(
+      "notifications:set",
+      (
+        { roomId, mode }: { roomId: string; mode: NotificationMode },
+        ack?: (payload: { ok: boolean; error?: string }) => void
+      ) => {
+        if (!roomId || !["all", "mentions", "mute"].includes(mode)) {
+          if (ack) ack({ ok: false, error: "Invalid notification settings" });
+          return;
+        }
+
+        const room = db
+          .prepare("SELECT id, type FROM rooms WHERE id = ?")
+          .get(roomId) as { id: string; type: "text" | "voice" | "dm" } | undefined;
+
+        if (!room) {
+          if (ack) ack({ ok: false, error: "Room not found" });
+          return;
+        }
+
+        if (room.type === "dm") {
+          const membership = db
+            .prepare(
+              "SELECT 1 FROM room_members WHERE room_id = ? AND user_id = ?"
+            )
+            .get(roomId, jwtUser.userId);
+          if (!membership) {
+            if (ack) ack({ ok: false, error: "Not authorized for this room" });
+            return;
+          }
+        }
+
+        try {
+          db.prepare(
+            `INSERT INTO user_room_notification_prefs (user_id, room_id, mode, updated_at)
+             VALUES (?, ?, ?, datetime('now'))
+             ON CONFLICT(user_id, room_id)
+             DO UPDATE SET mode = excluded.mode, updated_at = datetime('now')`
+          ).run(jwtUser.userId, roomId, mode);
+          if (ack) ack({ ok: true });
+        } catch (err) {
+          const error = err instanceof Error ? err.message : "Failed to save notification settings";
+          if (ack) ack({ ok: false, error });
+        }
+      }
+    );
+
     // Disconnect
     socket.on("disconnect", () => {
       const user = connectedUsers.get(socket.id);
       if (user) {
+        const ownedCalls = db
+          .prepare(
+            "SELECT id FROM rooms WHERE type = 'voice' AND is_temporary = 1 AND owner_user_id = ?"
+          )
+          .all(user.userId) as Array<{ id: string }>;
+        for (const call of ownedCalls) {
+          const participantIds = getCallParticipantIds(db, call.id);
+          db.prepare("DELETE FROM rooms WHERE id = ?").run(call.id);
+          for (const [sid, cu] of connectedUsers.entries()) {
+            if (participantIds.includes(cu.userId)) {
+              io.to(sid).emit("call:ended", { roomId: call.id, endedBy: user.userId });
+              io.sockets.sockets.get(sid)?.leave(call.id);
+            }
+          }
+        }
+        const memberCalls = db
+          .prepare(
+            "SELECT room_id FROM room_members WHERE user_id = ? AND room_id IN (SELECT id FROM rooms WHERE type = 'voice' AND is_temporary = 1)"
+          )
+          .all(user.userId) as Array<{ room_id: string }>;
+        for (const call of memberCalls) {
+          db.prepare("DELETE FROM room_members WHERE room_id = ? AND user_id = ?").run(
+            call.room_id,
+            user.userId
+          );
+          emitCallState(io, db, call.room_id);
+        }
+
         console.log(`User disconnected: ${user.username}`);
         // Delay offline updates to avoid brief reconnect blips toggling status.
         if (!hasOtherSockets(user.userId, socket.id)) {
@@ -655,7 +1387,7 @@ export function setupSocketHandlers(io: Server) {
           const timer = setTimeout(() => {
             pendingOfflineTimers.delete(user.userId);
             if (!hasAnySockets(user.userId)) {
-              db.prepare("UPDATE users SET status = 'offline' WHERE id = ?").run(
+              db.prepare("UPDATE users SET status = 'offline', activity_game = NULL WHERE id = ?").run(
                 user.userId
               );
               broadcastPresence(io);
