@@ -15,6 +15,7 @@ const GREEN = "\x1b[32m";
 const CYAN = "\x1b[36m";
 const YELLOW = "\x1b[33m";
 const MAGENTA = "\x1b[35m";
+const DEFAULT_MIN_PASSWORD_LENGTH = 10;
 
 function printBanner() {
   console.log();
@@ -117,6 +118,40 @@ interface SetupFlags {
   dataDir?: string;
 }
 
+function resolveMinPasswordLength(dataDir: string): number {
+  let minPasswordLength = DEFAULT_MIN_PASSWORD_LENGTH;
+
+  const configPath = path.join(path.resolve(dataDir), "config.json");
+  if (fs.existsSync(configPath)) {
+    try {
+      const existing = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      const configured = existing?.registration?.minPasswordLength;
+      if (Number.isInteger(configured)) {
+        minPasswordLength = configured;
+      }
+    } catch {
+      // Ignore parse/read errors and keep defaults
+    }
+  }
+
+  if (process.env.REGISTRATION_MIN_PASSWORD_LENGTH) {
+    const envValue = parseInt(process.env.REGISTRATION_MIN_PASSWORD_LENGTH, 10);
+    if (!Number.isNaN(envValue)) {
+      minPasswordLength = envValue;
+    }
+  }
+
+  if (
+    !Number.isInteger(minPasswordLength) ||
+    minPasswordLength < 6 ||
+    minPasswordLength > 128
+  ) {
+    return DEFAULT_MIN_PASSWORD_LENGTH;
+  }
+
+  return minPasswordLength;
+}
+
 export function parseSetupFlags(args: string[]): SetupFlags | null {
   const flags: SetupFlags = {};
   let hasFlags = false;
@@ -160,6 +195,7 @@ export async function runSetup(flags?: SetupFlags | null): Promise<void> {
     ? path.resolve(process.env.DATA_DIR)
     : process.cwd();
   const defaultStoragePath = path.join(defaultDataDir, "uploads");
+  const defaultMinPasswordLength = resolveMinPasswordLength(defaultDataDir);
 
   if (flags?.adminEmail && flags?.adminUsername && flags?.adminPassword) {
     // Non-interactive mode (flags or env vars)
@@ -170,6 +206,13 @@ export async function runSetup(flags?: SetupFlags | null): Promise<void> {
     adminPassword = flags.adminPassword;
     storagePath = flags.storagePath || defaultStoragePath;
     dataDir = flags.dataDir ? path.resolve(flags.dataDir) : defaultDataDir;
+
+    const minPasswordLength = resolveMinPasswordLength(dataDir);
+    if (adminPassword.length < minPasswordLength) {
+      throw new Error(
+        `Admin password must be at least ${minPasswordLength} characters (set by registration.minPasswordLength)`
+      );
+    }
 
     console.log();
     console.log(`${GREEN}  ✓${RESET} Running automated setup...`);
@@ -203,8 +246,10 @@ export async function runSetup(flags?: SetupFlags | null): Promise<void> {
       }
 
       adminPassword = await askPassword(rl, "Admin password");
-      while (adminPassword.length < 6) {
-        console.log(`${DIM}  Password must be at least 6 characters.${RESET}`);
+      while (adminPassword.length < defaultMinPasswordLength) {
+        console.log(
+          `${DIM}  Password must be at least ${defaultMinPasswordLength} characters.${RESET}`
+        );
         adminPassword = await askPassword(rl, "Admin password");
       }
 
@@ -248,12 +293,18 @@ export async function runSetup(flags?: SetupFlags | null): Promise<void> {
       storagePath: resolvedStorage,
       maxUploadSizeMB: existingConfig.files?.maxUploadSizeMB || 25,
     },
+    registration: {
+      ...(existingConfig.registration || {}),
+      minPasswordLength:
+        existingConfig.registration?.minPasswordLength ?? defaultMinPasswordLength,
+    },
   };
 
   fs.writeFileSync(configPath, JSON.stringify(newConfig, null, 2) + "\n");
 
   // Reload config so the rest of the app uses the new values
   loadConfig();
+  const config = getConfig();
 
   // Create admin user in the database
   const db = getDb();
@@ -263,7 +314,7 @@ export async function runSetup(flags?: SetupFlags | null): Promise<void> {
 
   if (!existing) {
     const id = crypto.randomUUID();
-    const passwordHash = bcrypt.hashSync(adminPassword, 10);
+    const passwordHash = bcrypt.hashSync(adminPassword, config.bcryptRounds);
 
     db.prepare(
       "INSERT INTO users (id, username, email, password_hash, status) VALUES (?, ?, ?, ?, 'online')"

@@ -14,6 +14,7 @@ interface RegistrationConfig {
   inviteCode: string;
   emailAllowlist: string[];
   emailBlocklist: string[];
+  minPasswordLength: number;
 }
 
 interface RoomsConfig {
@@ -44,8 +45,14 @@ export interface ServerConfig {
   serverDescription: string;
   motd: string;
   port: number;
+  trustProxy: boolean;
+  requestLogging: boolean;
   jwtSecret: string;
   jwtExpiryDays: number;
+  bcryptRounds: number;
+  loginMaxAttempts: number;
+  loginWindowMinutes: number;
+  loginLockoutMinutes: number;
   dbPath: string;
   maxUsers: number;
   messageHistoryLimit: number;
@@ -66,8 +73,14 @@ const DEFAULT_CONFIG: ServerConfig = {
   serverDescription: "",
   motd: "",
   port: 3001,
+  trustProxy: false,
+  requestLogging: true,
   jwtSecret: "",
   jwtExpiryDays: 7,
+  bcryptRounds: 12,
+  loginMaxAttempts: 5,
+  loginWindowMinutes: 10,
+  loginLockoutMinutes: 15,
   dbPath: "./chitchat.db",
   maxUsers: 0,
   messageHistoryLimit: 50,
@@ -81,6 +94,7 @@ const DEFAULT_CONFIG: ServerConfig = {
     inviteCode: "",
     emailAllowlist: [],
     emailBlocklist: [],
+    minPasswordLength: 10,
   },
   rooms: {
     userCanCreate: true,
@@ -175,7 +189,25 @@ export function loadConfig(): ServerConfig {
 
   // Env var overrides (highest priority)
   if (process.env.PORT) merged.port = parseInt(process.env.PORT, 10);
+  if (process.env.TRUST_PROXY) {
+    merged.trustProxy = process.env.TRUST_PROXY.toLowerCase() === "true";
+  }
+  if (process.env.REQUEST_LOGGING) {
+    merged.requestLogging = process.env.REQUEST_LOGGING.toLowerCase() === "true";
+  }
   if (process.env.JWT_SECRET) merged.jwtSecret = process.env.JWT_SECRET;
+  if (process.env.BCRYPT_ROUNDS) {
+    merged.bcryptRounds = parseInt(process.env.BCRYPT_ROUNDS, 10);
+  }
+  if (process.env.LOGIN_MAX_ATTEMPTS) {
+    merged.loginMaxAttempts = parseInt(process.env.LOGIN_MAX_ATTEMPTS, 10);
+  }
+  if (process.env.LOGIN_WINDOW_MINUTES) {
+    merged.loginWindowMinutes = parseInt(process.env.LOGIN_WINDOW_MINUTES, 10);
+  }
+  if (process.env.LOGIN_LOCKOUT_MINUTES) {
+    merged.loginLockoutMinutes = parseInt(process.env.LOGIN_LOCKOUT_MINUTES, 10);
+  }
   if (process.env.DB_PATH) merged.dbPath = process.env.DB_PATH;
   if (process.env.LIVEKIT_URL)
     merged.livekit.url = process.env.LIVEKIT_URL;
@@ -191,6 +223,46 @@ export function loadConfig(): ServerConfig {
   if (process.env.CORS_ALLOW_NO_ORIGIN) {
     merged.cors.allowNoOrigin =
       process.env.CORS_ALLOW_NO_ORIGIN.toLowerCase() === "true";
+  }
+  if (process.env.REGISTRATION_MIN_PASSWORD_LENGTH) {
+    merged.registration.minPasswordLength = parseInt(
+      process.env.REGISTRATION_MIN_PASSWORD_LENGTH,
+      10
+    );
+  }
+  if (
+    !Number.isInteger(merged.registration.minPasswordLength) ||
+    merged.registration.minPasswordLength < 6
+  ) {
+    merged.registration.minPasswordLength = 10;
+  }
+  if (
+    !Number.isInteger(merged.bcryptRounds) ||
+    merged.bcryptRounds < 10 ||
+    merged.bcryptRounds > 15
+  ) {
+    merged.bcryptRounds = 12;
+  }
+  if (
+    !Number.isInteger(merged.loginMaxAttempts) ||
+    merged.loginMaxAttempts < 1 ||
+    merged.loginMaxAttempts > 100
+  ) {
+    merged.loginMaxAttempts = 5;
+  }
+  if (
+    !Number.isInteger(merged.loginWindowMinutes) ||
+    merged.loginWindowMinutes < 1 ||
+    merged.loginWindowMinutes > 1440
+  ) {
+    merged.loginWindowMinutes = 10;
+  }
+  if (
+    !Number.isInteger(merged.loginLockoutMinutes) ||
+    merged.loginLockoutMinutes < 1 ||
+    merged.loginLockoutMinutes > 1440
+  ) {
+    merged.loginLockoutMinutes = 15;
   }
   if (!path.isAbsolute(merged.dbPath)) {
     merged.dbPath = path.resolve(dataDir, merged.dbPath);

@@ -489,6 +489,11 @@
           <input type="text" id="cfg-reg-inviteCode">
         </div>
         <div class="field">
+          <label for="cfg-reg-minPasswordLength">Minimum Password Length</label>
+          <input type="number" id="cfg-reg-minPasswordLength" min="6" max="128">
+          <div class="field-hint">Applies to new registrations</div>
+        </div>
+        <div class="field">
           <label for="cfg-reg-emailAllowlist">Email Allowlist (one per line)</label>
           <textarea id="cfg-reg-emailAllowlist" placeholder="@company.com"></textarea>
           <div class="field-hint">Leave empty to allow all emails</div>
@@ -566,6 +571,21 @@
       <div class="card">
         <h3>Security</h3>
         <div class="inline-field">
+          <label>Trust Reverse Proxy</label>
+          <label class="toggle">
+            <input type="checkbox" id="cfg-trustProxy">
+            <span class="toggle-slider"></span>
+          </label>
+          <div class="field-hint" style="margin-left:0;margin-top:4px">Enable when running behind Nginx/Cloudflare</div>
+        </div>
+        <div class="inline-field">
+          <label>Request Logging</label>
+          <label class="toggle">
+            <input type="checkbox" id="cfg-requestLogging">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="inline-field">
           <label>Maintenance Mode</label>
           <label class="toggle">
             <input type="checkbox" id="cfg-maintenanceMode">
@@ -576,6 +596,22 @@
         <div class="field">
           <label for="cfg-jwtExpiryDays">JWT Token Expiry (days)</label>
           <input type="number" id="cfg-jwtExpiryDays" min="1" max="365">
+        </div>
+        <div class="field">
+          <label for="cfg-bcryptRounds">Password Hash Cost (bcrypt rounds)</label>
+          <input type="number" id="cfg-bcryptRounds" min="10" max="15">
+        </div>
+        <div class="field">
+          <label for="cfg-loginMaxAttempts">Login Max Attempts</label>
+          <input type="number" id="cfg-loginMaxAttempts" min="1" max="100">
+        </div>
+        <div class="field">
+          <label for="cfg-loginWindowMinutes">Login Attempt Window (minutes)</label>
+          <input type="number" id="cfg-loginWindowMinutes" min="1" max="1440">
+        </div>
+        <div class="field">
+          <label for="cfg-loginLockoutMinutes">Login Lockout Duration (minutes)</label>
+          <input type="number" id="cfg-loginLockoutMinutes" min="1" max="1440">
         </div>
         <div class="field">
           <label for="cfg-adminEmails">Admin Emails (one per line)</label>
@@ -796,11 +832,18 @@
       $('#cfg-messageRetentionDays').value = currentConfig.messageRetentionDays;
       $('#cfg-rateLimitPerMinute').value = currentConfig.rateLimitPerMinute || 0;
       $('#cfg-jwtExpiryDays').value = currentConfig.jwtExpiryDays;
+      $('#cfg-bcryptRounds').value = currentConfig.bcryptRounds || 12;
+      $('#cfg-loginMaxAttempts').value = currentConfig.loginMaxAttempts || 5;
+      $('#cfg-loginWindowMinutes').value = currentConfig.loginWindowMinutes || 10;
+      $('#cfg-loginLockoutMinutes').value = currentConfig.loginLockoutMinutes || 15;
+      $('#cfg-trustProxy').checked = currentConfig.trustProxy || false;
+      $('#cfg-requestLogging').checked = currentConfig.requestLogging !== false;
       $('#cfg-maintenanceMode').checked = currentConfig.maintenanceMode || false;
 
       $('#cfg-reg-open').checked = currentConfig.registration.open;
       $('#cfg-reg-inviteOnly').checked = currentConfig.registration.inviteOnly;
       $('#cfg-reg-inviteCode').value = currentConfig.registration.inviteCode;
+      $('#cfg-reg-minPasswordLength').value = currentConfig.registration.minPasswordLength || 10;
       $('#cfg-reg-emailAllowlist').value = currentConfig.registration.emailAllowlist.join('\n');
       $('#cfg-reg-emailBlocklist').value = currentConfig.registration.emailBlocklist.join('\n');
 
@@ -839,11 +882,18 @@
       messageRetentionDays: parseInt($('#cfg-messageRetentionDays').value, 10),
       rateLimitPerMinute: parseInt($('#cfg-rateLimitPerMinute').value, 10) || 0,
       jwtExpiryDays: parseInt($('#cfg-jwtExpiryDays').value, 10),
+      bcryptRounds: parseInt($('#cfg-bcryptRounds').value, 10) || 12,
+      loginMaxAttempts: parseInt($('#cfg-loginMaxAttempts').value, 10) || 5,
+      loginWindowMinutes: parseInt($('#cfg-loginWindowMinutes').value, 10) || 10,
+      loginLockoutMinutes: parseInt($('#cfg-loginLockoutMinutes').value, 10) || 15,
+      trustProxy: $('#cfg-trustProxy').checked,
+      requestLogging: $('#cfg-requestLogging').checked,
       maintenanceMode: $('#cfg-maintenanceMode').checked,
       registration: {
         open: $('#cfg-reg-open').checked,
         inviteOnly: $('#cfg-reg-inviteOnly').checked,
         inviteCode: $('#cfg-reg-inviteCode').value.trim(),
+        minPasswordLength: parseInt($('#cfg-reg-minPasswordLength').value, 10) || 10,
         emailAllowlist: parseLines($('#cfg-reg-emailAllowlist').value),
         emailBlocklist: parseLines($('#cfg-reg-emailBlocklist').value),
       },

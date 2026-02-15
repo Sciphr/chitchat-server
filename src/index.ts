@@ -38,6 +38,7 @@ async function main() {
 
   const app = express();
   const httpServer = createServer(app);
+  app.set("trust proxy", config.trustProxy);
   const allowedOrigins = new Set(
     config.cors.allowedOrigins.map((origin) =>
       origin.replace(/\/+$/, "").toLowerCase()
@@ -50,6 +51,15 @@ async function main() {
     }
     const normalized = origin.replace(/\/+$/, "").toLowerCase();
     return allowedOrigins.has(normalized);
+  };
+
+  const getOriginFromReferer = (referer?: string): string | undefined => {
+    if (!referer) return undefined;
+    try {
+      return new URL(referer).origin;
+    } catch {
+      return undefined;
+    }
   };
 
   // Socket.io server with explicit CORS allowlist
@@ -70,7 +80,64 @@ async function main() {
       },
     })
   );
+  app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+    res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+    if (req.secure || req.headers["x-forwarded-proto"] === "https") {
+      res.setHeader(
+        "Strict-Transport-Security",
+        "max-age=31536000; includeSubDomains"
+      );
+    }
+    res.setHeader(
+      "Permissions-Policy",
+      "camera=(), microphone=(), geolocation=()"
+    );
+    next();
+  });
+  if (config.requestLogging) {
+    app.use((req, res, next) => {
+      const startedAt = Date.now();
+      res.on("finish", () => {
+        const durationMs = Date.now() - startedAt;
+        const ip = req.ip || req.socket.remoteAddress || "unknown";
+        console.log(
+          `${new Date().toISOString()} ${req.method} ${req.originalUrl} ${res.statusCode} ${durationMs}ms ip=${ip}`
+        );
+      });
+      next();
+    });
+  }
   app.use(express.json());
+
+  // Defense-in-depth: block state-changing requests from untrusted browser origins.
+  app.use("/api", (req, res, next) => {
+    if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
+      next();
+      return;
+    }
+
+    const origin = req.headers.origin;
+    if (origin) {
+      if (!isOriginAllowed(origin)) {
+        res.status(403).json({ error: "Origin not allowed" });
+        return;
+      }
+      next();
+      return;
+    }
+
+    const refererOrigin = getOriginFromReferer(req.headers.referer);
+    if (refererOrigin && !isOriginAllowed(refererOrigin)) {
+      res.status(403).json({ error: "Referer origin not allowed" });
+      return;
+    }
+
+    next();
+  });
 
   // Share Socket.IO with REST routes so they can broadcast events
   app.set("io", io);
@@ -86,6 +153,14 @@ async function main() {
   // Standalone admin panel (served from server/admin/)
   // __dirname = server/dist/, so go up one level to reach server/admin/
   const adminDir = path.join(__dirname, "..", "admin");
+  app.use("/admin", (_req, res, next) => {
+    res.setHeader(
+      "Content-Security-Policy",
+      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    );
+    res.setHeader("Cache-Control", "no-store");
+    next();
+  });
   app.use("/admin", express.static(adminDir));
   app.get("/admin", (_req, res) => {
     res.sendFile(path.join(adminDir, "index.html"));

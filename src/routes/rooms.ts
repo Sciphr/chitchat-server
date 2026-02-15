@@ -5,6 +5,9 @@ import { getConfig } from "../config.js";
 import { requireAuth } from "../middleware/auth.js";
 
 const router = Router();
+const MAX_ROOM_NAME_LENGTH = 50;
+const ROOM_NAME_PATTERN = /^[a-zA-Z0-9 _-]+$/;
+const ALLOWED_ROOM_TYPES = new Set(["text", "voice"]);
 
 // GET /api/rooms
 router.get("/", requireAuth, (_req, res) => {
@@ -29,6 +32,32 @@ router.post("/", requireAuth, (req, res) => {
     res.status(400).json({ error: "Missing required fields" });
     return;
   }
+  if (typeof name !== "string" || typeof type !== "string") {
+    res.status(400).json({ error: "name and type must be strings" });
+    return;
+  }
+
+  const normalizedName = name.trim().replace(/\s+/g, " ");
+  const normalizedType = type.trim().toLowerCase();
+
+  if (normalizedName.length < 1 || normalizedName.length > MAX_ROOM_NAME_LENGTH) {
+    res
+      .status(400)
+      .json({ error: `name must be between 1 and ${MAX_ROOM_NAME_LENGTH} characters` });
+    return;
+  }
+
+  if (!ROOM_NAME_PATTERN.test(normalizedName)) {
+    res.status(400).json({
+      error: "name contains invalid characters (allowed: letters, numbers, spaces, _, -)",
+    });
+    return;
+  }
+
+  if (!ALLOWED_ROOM_TYPES.has(normalizedType)) {
+    res.status(400).json({ error: "type must be one of: text, voice" });
+    return;
+  }
 
   const db = getDb();
   const id = crypto.randomUUID();
@@ -36,7 +65,7 @@ router.post("/", requireAuth, (req, res) => {
 
   db.prepare(
     "INSERT INTO rooms (id, name, type, created_by) VALUES (?, ?, ?, ?)"
-  ).run(id, name, type, created_by);
+  ).run(id, normalizedName, normalizedType, created_by);
 
   const room = db.prepare("SELECT * FROM rooms WHERE id = ?").get(id);
   res.json(room);

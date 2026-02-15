@@ -16,7 +16,7 @@ type NotificationMode = "all" | "mentions" | "mute";
 const connectedUsers = new Map<string, ConnectedUser>();
 const pendingOfflineTimers = new Map<string, NodeJS.Timeout>();
 
-// Rate limiting: track message timestamps per socket
+// Rate limiting: track message timestamps per user
 const rateLimitBuckets = new Map<string, number[]>();
 const OFFLINE_GRACE_MS = 8000;
 
@@ -608,9 +608,8 @@ export function setupSocketHandlers(io: Server) {
           emitRoomStructure(io, db);
           if (ack) ack({ ok: true });
         } catch (err) {
-          const error =
-            err instanceof Error ? err.message : "Failed to update layout";
-          if (ack) ack({ ok: false, error });
+          console.error("Failed to update layout:", err);
+          if (ack) ack({ ok: false, error: "Failed to update layout" });
         }
       }
     );
@@ -744,12 +743,13 @@ export function setupSocketHandlers(io: Server) {
         }) => void
       ) => {
         const config = getConfig();
+        const limiterKey = jwtUser.userId;
 
         // Rate limiting
         if (config.rateLimitPerMinute > 0) {
           const now = Date.now();
           const windowStart = now - 60_000;
-          let bucket = rateLimitBuckets.get(socket.id) ?? [];
+          let bucket = rateLimitBuckets.get(limiterKey) ?? [];
           bucket = bucket.filter((ts) => ts > windowStart);
           if (bucket.length >= config.rateLimitPerMinute) {
             if (ack) {
@@ -762,7 +762,7 @@ export function setupSocketHandlers(io: Server) {
             return;
           }
           bucket.push(now);
-          rateLimitBuckets.set(socket.id, bucket);
+          rateLimitBuckets.set(limiterKey, bucket);
         }
 
         const trimmed = (content || "").trim();
@@ -900,11 +900,9 @@ export function setupSocketHandlers(io: Server) {
             ack({ ok: true, message: payloadWithMeta, client_nonce });
           }
         } catch (err) {
-          const errorMessage =
-            err instanceof Error ? err.message : "Failed to send message";
-          console.error("Failed to insert message:", errorMessage);
+          console.error("Failed to insert message:", err);
           if (ack) {
-            ack({ ok: false, error: errorMessage, client_nonce });
+            ack({ ok: false, error: "Failed to send message", client_nonce });
           }
         }
       }
@@ -970,8 +968,8 @@ export function setupSocketHandlers(io: Server) {
           });
           if (ack) ack({ ok: true });
         } catch (err) {
-          const error = err instanceof Error ? err.message : "Failed to update reaction";
-          if (ack) ack({ ok: false, error });
+          console.error("Failed to update reaction:", err);
+          if (ack) ack({ ok: false, error: "Failed to update reaction" });
         }
       }
     );
@@ -1295,8 +1293,8 @@ export function setupSocketHandlers(io: Server) {
           }
           if (ack) ack({ ok: true, modes });
         } catch (err) {
-          const error = err instanceof Error ? err.message : "Failed to load notification settings";
-          if (ack) ack({ ok: false, error });
+          console.error("Failed to load notification settings:", err);
+          if (ack) ack({ ok: false, error: "Failed to load notification settings" });
         }
       }
     );
@@ -1342,8 +1340,8 @@ export function setupSocketHandlers(io: Server) {
           ).run(jwtUser.userId, roomId, mode);
           if (ack) ack({ ok: true });
         } catch (err) {
-          const error = err instanceof Error ? err.message : "Failed to save notification settings";
-          if (ack) ack({ ok: false, error });
+          console.error("Failed to save notification settings:", err);
+          if (ack) ack({ ok: false, error: "Failed to save notification settings" });
         }
       }
     );
@@ -1397,7 +1395,9 @@ export function setupSocketHandlers(io: Server) {
         }
       }
       connectedUsers.delete(socket.id);
-      rateLimitBuckets.delete(socket.id);
+      if (user && !hasOtherSockets(user.userId, socket.id)) {
+        rateLimitBuckets.delete(user.userId);
+      }
       broadcastPresence(io);
     });
   });

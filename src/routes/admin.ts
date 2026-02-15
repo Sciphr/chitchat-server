@@ -36,6 +36,20 @@ router.put("/config", requireAuth, requireAdmin, (req, res) => {
     return;
   }
   if (
+    partial.trustProxy !== undefined &&
+    typeof partial.trustProxy !== "boolean"
+  ) {
+    res.status(400).json({ error: "trustProxy must be a boolean" });
+    return;
+  }
+  if (
+    partial.requestLogging !== undefined &&
+    typeof partial.requestLogging !== "boolean"
+  ) {
+    res.status(400).json({ error: "requestLogging must be a boolean" });
+    return;
+  }
+  if (
     partial.maxUsers !== undefined &&
     (typeof partial.maxUsers !== "number" || partial.maxUsers < 0)
   ) {
@@ -86,6 +100,58 @@ router.put("/config", requireAuth, requireAdmin, (req, res) => {
     res.status(400).json({ error: "jwtExpiryDays must be between 1 and 365" });
     return;
   }
+  if (
+    partial.bcryptRounds !== undefined &&
+    (typeof partial.bcryptRounds !== "number" ||
+      !Number.isInteger(partial.bcryptRounds) ||
+      partial.bcryptRounds < 10 ||
+      partial.bcryptRounds > 15)
+  ) {
+    res.status(400).json({ error: "bcryptRounds must be an integer between 10 and 15" });
+    return;
+  }
+  if (
+    partial.loginMaxAttempts !== undefined &&
+    (typeof partial.loginMaxAttempts !== "number" ||
+      !Number.isInteger(partial.loginMaxAttempts) ||
+      partial.loginMaxAttempts < 1 ||
+      partial.loginMaxAttempts > 100)
+  ) {
+    res.status(400).json({ error: "loginMaxAttempts must be an integer between 1 and 100" });
+    return;
+  }
+  if (
+    partial.loginWindowMinutes !== undefined &&
+    (typeof partial.loginWindowMinutes !== "number" ||
+      !Number.isInteger(partial.loginWindowMinutes) ||
+      partial.loginWindowMinutes < 1 ||
+      partial.loginWindowMinutes > 1440)
+  ) {
+    res.status(400).json({ error: "loginWindowMinutes must be an integer between 1 and 1440" });
+    return;
+  }
+  if (
+    partial.loginLockoutMinutes !== undefined &&
+    (typeof partial.loginLockoutMinutes !== "number" ||
+      !Number.isInteger(partial.loginLockoutMinutes) ||
+      partial.loginLockoutMinutes < 1 ||
+      partial.loginLockoutMinutes > 1440)
+  ) {
+    res.status(400).json({ error: "loginLockoutMinutes must be an integer between 1 and 1440" });
+    return;
+  }
+  if (partial.registration) {
+    if (
+      partial.registration.minPasswordLength !== undefined &&
+      (typeof partial.registration.minPasswordLength !== "number" ||
+        !Number.isInteger(partial.registration.minPasswordLength) ||
+        partial.registration.minPasswordLength < 6 ||
+        partial.registration.minPasswordLength > 128)
+    ) {
+      res.status(400).json({ error: "registration.minPasswordLength must be an integer between 6 and 128" });
+      return;
+    }
+  }
 
   // Validate file storage limits
   if (partial.files) {
@@ -130,8 +196,9 @@ router.put("/config", requireAuth, requireAdmin, (req, res) => {
     const { requiresRestart } = updateConfig(partial);
     res.json({ config: getRedactedConfig(), requiresRestart });
   } catch (err) {
+    console.error("Failed to update config:", err);
     res.status(500).json({
-      error: err instanceof Error ? err.message : "Failed to update config",
+      error: "Failed to update config",
     });
   }
 });

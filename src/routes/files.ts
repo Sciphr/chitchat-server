@@ -8,16 +8,61 @@ import { requireAuth } from "../middleware/auth.js";
 
 const router = Router();
 
+function parseUploadBody(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction,
+) {
+  const config = getConfig();
+  const maxUploadSizeMB = Math.max(
+    1,
+    Math.min(1024, config.files.maxUploadSizeMB || 25),
+  );
+
+  express.raw({
+    type: "application/octet-stream",
+    limit: `${maxUploadSizeMB}mb`,
+  })(req, res, (err?: unknown) => {
+    if (!err) {
+      next();
+      return;
+    }
+
+    const bodyError = err as { type?: string };
+    if (bodyError.type === "entity.too.large") {
+      res.status(413).json({
+        error: `File exceeds maxUploadSizeMB (${maxUploadSizeMB} MB)`,
+      });
+      return;
+    }
+
+    next(err as Error);
+  });
+}
+
 function getStorageRoot() {
   const config = getConfig();
   return path.resolve(config.files.storagePath);
 }
 
 function sanitizeFilename(filename: string) {
-  const trimmed = filename.trim();
+  const trimmed = filename.trim().normalize("NFKC");
   const base = path.basename(trimmed || "upload");
-  const cleaned = base.replace(/[^\w.\-() ]+/g, "_");
+  const noControlChars = base.replace(/[\u0000-\u001f\u007f]/g, "");
+  const cleaned = noControlChars
+    .replace(/[^\w.\-() ]+/g, "_")
+    .replace(/^[.\s]+/, "")
+    .replace(/[.\s]+$/, "")
+    .slice(0, 255);
   return cleaned.length > 0 ? cleaned : "upload";
+}
+
+function sanitizeExtension(originalName: string) {
+  const ext = path.extname(originalName).toLowerCase().slice(0, 20);
+  const safe = ext.replace(/[^a-z0-9.]/g, "");
+  // Only keep normal extensions like ".png", ".tar.gz" => ".gz"
+  if (!safe.startsWith(".") || safe === ".") return "";
+  return safe;
 }
 
 function buildStorageRelativePath(attachmentId: string, originalName: string) {
@@ -25,15 +70,15 @@ function buildStorageRelativePath(attachmentId: string, originalName: string) {
   const yyyy = now.getUTCFullYear().toString();
   const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(now.getUTCDate()).padStart(2, "0");
-  const ext = path.extname(originalName).slice(0, 20);
+  const ext = sanitizeExtension(originalName);
   const fileName = `${attachmentId}${ext}`;
   return path.join(yyyy, mm, dd, fileName);
 }
 
 function safeResolveStoragePath(root: string, relativePath: string) {
   const fullPath = path.resolve(root, relativePath);
-  const normalizedRoot = root.endsWith(path.sep) ? root : root + path.sep;
-  if (!fullPath.startsWith(normalizedRoot)) {
+  const relative = path.relative(root, fullPath);
+  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
     throw new Error("Invalid storage path");
   }
   return fullPath;
@@ -60,7 +105,7 @@ function getDisposition(mimeType: string) {
 router.post(
   "/upload",
   requireAuth,
-  express.raw({ type: "application/octet-stream", limit: "1024mb" }),
+  parseUploadBody,
   (req, res) => {
     const user = (req as any).user as { userId: string };
     const db = getDb();
@@ -68,7 +113,9 @@ router.post(
     const body = req.body as Buffer;
 
     if (!Buffer.isBuffer(body) || body.length === 0) {
-      res.status(400).json({ error: "Upload body is required (application/octet-stream)" });
+      res
+        .status(400)
+        .json({ error: "Upload body is required (application/octet-stream)" });
       return;
     }
 
@@ -80,14 +127,22 @@ router.post(
       return;
     }
 
-    const requestedName =
-      (req.header("x-file-name") || req.query.filename || "upload.bin").toString();
+    const requestedName = (
+      req.header("x-file-name") ||
+      req.query.filename ||
+      "upload.bin"
+    ).toString();
     const originalName = sanitizeFilename(requestedName);
-    const mimeType = (req.header("content-type") || "application/octet-stream").toString();
+    const mimeType = (
+      req.header("content-type") || "application/octet-stream"
+    ).toString();
 
     const attachmentId = crypto.randomUUID();
     const storageRoot = getStorageRoot();
-    const relativeStoragePath = buildStorageRelativePath(attachmentId, originalName);
+    const relativeStoragePath = buildStorageRelativePath(
+      attachmentId,
+      originalName,
+    );
     const fullPath = safeResolveStoragePath(storageRoot, relativeStoragePath);
 
     try {
@@ -97,14 +152,14 @@ router.post(
       db.prepare(
         `INSERT INTO attachments
          (id, uploaded_by, original_name, mime_type, size_bytes, storage_path)
-         VALUES (?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?)`,
       ).run(
         attachmentId,
         user.userId,
         originalName,
         mimeType,
         body.length,
-        relativeStoragePath
+        relativeStoragePath,
       );
 
       res.json({
@@ -115,11 +170,12 @@ router.post(
         url: `/api/files/${attachmentId}`,
       });
     } catch (err) {
+      console.error("Failed to store file:", err);
       res.status(500).json({
-        error: err instanceof Error ? err.message : "Failed to store file",
+        error: "Failed to store file",
       });
     }
-  }
+  },
 );
 
 // POST /api/files/link
@@ -145,7 +201,9 @@ router.post("/link", requireAuth, (req, res) => {
     return;
   }
   if (message.user_id !== user.userId) {
-    res.status(403).json({ error: "Not authorized to attach files to this message" });
+    res
+      .status(403)
+      .json({ error: "Not authorized to attach files to this message" });
     return;
   }
 
@@ -162,7 +220,7 @@ router.post("/link", requireAuth, (req, res) => {
   }
 
   db.prepare(
-    "INSERT OR IGNORE INTO message_attachments (message_id, attachment_id) VALUES (?, ?)"
+    "INSERT OR IGNORE INTO message_attachments (message_id, attachment_id) VALUES (?, ?)",
   ).run(messageId, attachmentId);
 
   res.json({ ok: true });
@@ -178,7 +236,7 @@ router.get("/message/:messageId", requireAuth, (req, res) => {
        FROM message_attachments ma
        JOIN attachments a ON a.id = ma.attachment_id
        WHERE ma.message_id = ?
-       ORDER BY a.created_at ASC`
+       ORDER BY a.created_at ASC`,
     )
     .all(req.params.messageId) as Array<{
     id: string;
@@ -196,7 +254,7 @@ router.get("/message/:messageId", requireAuth, (req, res) => {
       sizeBytes: row.size_bytes,
       createdAt: row.created_at,
       url: `/api/files/${row.id}`,
-    }))
+    })),
   );
 });
 
@@ -207,7 +265,7 @@ router.get("/:id", requireAuth, (req, res) => {
   const row = db
     .prepare(
       `SELECT id, original_name, mime_type, size_bytes, storage_path
-       FROM attachments WHERE id = ?`
+       FROM attachments WHERE id = ?`,
     )
     .get(req.params.id) as
     | {
@@ -245,7 +303,7 @@ router.get("/:id", requireAuth, (req, res) => {
   res.setHeader("Content-Length", String(row.size_bytes));
   res.setHeader(
     "Content-Disposition",
-    `${disposition}; filename*=UTF-8''${encodedName}`
+    `${disposition}; filename*=UTF-8''${encodedName}`,
   );
 
   const stream = fs.createReadStream(fullPath);
