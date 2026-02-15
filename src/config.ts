@@ -34,6 +34,11 @@ interface FilesConfig {
   maxUploadSizeMB: number;
 }
 
+interface CorsConfig {
+  allowedOrigins: string[];
+  allowNoOrigin: boolean;
+}
+
 export interface ServerConfig {
   serverName: string;
   serverDescription: string;
@@ -53,6 +58,7 @@ export interface ServerConfig {
   adminEmails: string[];
   livekit: LiveKitConfig;
   files: FilesConfig;
+  cors: CorsConfig;
 }
 
 const DEFAULT_CONFIG: ServerConfig = {
@@ -96,12 +102,31 @@ const DEFAULT_CONFIG: ServerConfig = {
     storagePath: "./uploads",
     maxUploadSizeMB: 25,
   },
+  cors: {
+    allowedOrigins: [
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+      "http://localhost:5173",
+      "http://127.0.0.1:5173",
+    ],
+    allowNoOrigin: true,
+  },
 };
 
 let config: ServerConfig | null = null;
 
+function getDataDir(): string {
+  if (process.env.DATA_DIR && process.env.DATA_DIR.trim()) {
+    return path.resolve(process.env.DATA_DIR.trim());
+  }
+  if ((process as NodeJS.Process & { pkg?: unknown }).pkg) {
+    return path.dirname(process.execPath);
+  }
+  return process.cwd();
+}
+
 function getConfigPath(): string {
-  return path.join(process.cwd(), "config.json");
+  return path.join(getDataDir(), "config.json");
 }
 
 function deepMerge(target: any, source: any): any {
@@ -124,6 +149,7 @@ function deepMerge(target: any, source: any): any {
 }
 
 export function loadConfig(): ServerConfig {
+  const dataDir = getDataDir();
   const configPath = getConfigPath();
   let fileConfig: Partial<ServerConfig> = {};
 
@@ -157,6 +183,21 @@ export function loadConfig(): ServerConfig {
     merged.livekit.apiKey = process.env.LIVEKIT_API_KEY;
   if (process.env.LIVEKIT_API_SECRET)
     merged.livekit.apiSecret = process.env.LIVEKIT_API_SECRET;
+  if (process.env.CORS_ALLOWED_ORIGINS) {
+    merged.cors.allowedOrigins = process.env.CORS_ALLOWED_ORIGINS.split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean);
+  }
+  if (process.env.CORS_ALLOW_NO_ORIGIN) {
+    merged.cors.allowNoOrigin =
+      process.env.CORS_ALLOW_NO_ORIGIN.toLowerCase() === "true";
+  }
+  if (!path.isAbsolute(merged.dbPath)) {
+    merged.dbPath = path.resolve(dataDir, merged.dbPath);
+  }
+  if (!path.isAbsolute(merged.files.storagePath)) {
+    merged.files.storagePath = path.resolve(dataDir, merged.files.storagePath);
+  }
 
   // Write config back (saves generated JWT secret, fills in any new fields)
   try {

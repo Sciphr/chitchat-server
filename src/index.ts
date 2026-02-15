@@ -38,17 +38,38 @@ async function main() {
 
   const app = express();
   const httpServer = createServer(app);
+  const allowedOrigins = new Set(
+    config.cors.allowedOrigins.map((origin) =>
+      origin.replace(/\/+$/, "").toLowerCase()
+    )
+  );
 
-  // Socket.io server — allow all origins for self-hosted flexibility
+  const isOriginAllowed = (origin?: string): boolean => {
+    if (!origin) {
+      return config.cors.allowNoOrigin;
+    }
+    const normalized = origin.replace(/\/+$/, "").toLowerCase();
+    return allowedOrigins.has(normalized);
+  };
+
+  // Socket.io server with explicit CORS allowlist
   const io = new Server(httpServer, {
     cors: {
-      origin: "*",
+      origin: (origin, callback) => {
+        callback(null, isOriginAllowed(origin));
+      },
       methods: ["GET", "POST"],
     },
   });
 
   // Middleware
-  app.use(cors());
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        callback(null, isOriginAllowed(origin));
+      },
+    })
+  );
   app.use(express.json());
 
   // Share Socket.IO with REST routes so they can broadcast events

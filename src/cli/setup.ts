@@ -156,7 +156,9 @@ export async function runSetup(flags?: SetupFlags | null): Promise<void> {
   let storagePath: string;
   let dataDir: string;
 
-  const defaultDataDir = process.cwd();
+  const defaultDataDir = process.env.DATA_DIR?.trim()
+    ? path.resolve(process.env.DATA_DIR)
+    : process.cwd();
   const defaultStoragePath = path.join(defaultDataDir, "uploads");
 
   if (flags?.adminEmail && flags?.adminUsername && flags?.adminPassword) {
@@ -167,7 +169,7 @@ export async function runSetup(flags?: SetupFlags | null): Promise<void> {
     adminUsername = flags.adminUsername;
     adminPassword = flags.adminPassword;
     storagePath = flags.storagePath || defaultStoragePath;
-    dataDir = flags.dataDir || defaultDataDir;
+    dataDir = flags.dataDir ? path.resolve(flags.dataDir) : defaultDataDir;
 
     console.log();
     console.log(`${GREEN}  ✓${RESET} Running automated setup...`);
@@ -223,6 +225,7 @@ export async function runSetup(flags?: SetupFlags | null): Promise<void> {
   }
 
   // Write config.json
+  dataDir = path.resolve(dataDir);
   const configPath = path.join(dataDir, "config.json");
   let existingConfig: Record<string, any> = {};
   if (fs.existsSync(configPath)) {
