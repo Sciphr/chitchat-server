@@ -35,7 +35,9 @@ CREATE TABLE IF NOT EXISTS rooms (
   category_id TEXT REFERENCES room_categories(id) ON DELETE SET NULL,
   position INTEGER NOT NULL DEFAULT 0,
   is_temporary INTEGER NOT NULL DEFAULT 0,
-  owner_user_id TEXT REFERENCES users(id) ON DELETE SET NULL
+  owner_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  message_retention_mode TEXT NOT NULL DEFAULT 'inherit' CHECK (message_retention_mode IN ('inherit', 'never', 'days')),
+  message_retention_days INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS room_categories (

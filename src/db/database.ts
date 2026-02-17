@@ -157,6 +157,39 @@ function ensureUserVoicePreferenceColumns(database: Database.Database) {
   }
 }
 
+function ensureRoomRetentionColumns(database: Database.Database) {
+  const cols = database
+    .prepare("PRAGMA table_info(rooms)")
+    .all() as Array<{ name: string }>;
+  if (!cols.length) return;
+  const names = new Set(cols.map((col) => col.name));
+  if (!names.has("message_retention_mode")) {
+    database.exec(
+      "ALTER TABLE rooms ADD COLUMN message_retention_mode TEXT NOT NULL DEFAULT 'inherit';"
+    );
+  }
+  if (!names.has("message_retention_days")) {
+    database.exec("ALTER TABLE rooms ADD COLUMN message_retention_days INTEGER;");
+  }
+}
+
+function ensurePasswordResetTable(database: Database.Database) {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS password_resets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      requested_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_password_resets_user_id ON password_resets(user_id);
+    CREATE INDEX IF NOT EXISTS idx_password_resets_expires_at ON password_resets(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_password_resets_used_at ON password_resets(used_at);
+  `);
+}
+
 function runMigrations(database: Database.Database) {
   database.exec(`
     CREATE TABLE IF NOT EXISTS _migrations (
@@ -194,7 +227,9 @@ export function getDb(): Database.Database {
   ensureRoleCapabilityColumns(db);
   ensureModerationTables(db);
   ensureMessageReplyColumn(db);
+  ensureRoomRetentionColumns(db);
   ensureUserVoicePreferenceColumns(db);
+  ensurePasswordResetTable(db);
   db.exec(getSeedSQL());
 
   return db;

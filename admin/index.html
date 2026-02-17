@@ -67,6 +67,58 @@
       color: var(--text-secondary);
       margin-bottom: 6px;
     }
+    .tip {
+      display: inline-flex;
+      width: 16px;
+      height: 16px;
+      margin-left: 6px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: help;
+      position: relative;
+      vertical-align: middle;
+      line-height: 1;
+      user-select: none;
+    }
+    .tip:hover,
+    .tip:focus {
+      color: var(--accent);
+      border-color: var(--accent);
+      outline: none;
+    }
+    .tip::after {
+      content: attr(data-tip);
+      position: absolute;
+      left: 50%;
+      bottom: calc(100% + 8px);
+      transform: translateX(-50%);
+      width: 280px;
+      max-width: min(280px, 70vw);
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #0b1222;
+      color: var(--text-primary);
+      font-size: 12px;
+      font-weight: 400;
+      text-align: left;
+      line-height: 1.35;
+      white-space: normal;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+      z-index: 40;
+      box-shadow: var(--shadow);
+    }
+    .tip:hover::after,
+    .tip:focus::after {
+      opacity: 1;
+    }
     input[type="text"], input[type="password"], input[type="email"], input[type="number"], select, textarea {
       width: 100%;
       padding: 10px 12px;
@@ -518,14 +570,14 @@
           <input type="text" id="cfg-serverBannerUrl" placeholder="https://example.com/banner.jpg">
         </div>
         <div class="inline-field">
-          <label>Public Server</label>
+          <label>Public Server <span class="tip" tabindex="0" data-tip="Controls how the server presents itself in discovery UIs. It does not bypass registration or invite settings.">?</span></label>
           <label class="toggle">
             <input type="checkbox" id="cfg-serverPublic">
             <span class="toggle-slider"></span>
           </label>
         </div>
         <div class="field">
-          <label for="cfg-motd">Message of the Day</label>
+          <label for="cfg-motd">Message of the Day <span class="tip" tabindex="0" data-tip="Shown to users in-app as a server announcement. Keep this concise for announcements, maintenance notices, or onboarding notes.">?</span></label>
           <textarea id="cfg-motd" placeholder="Shown as a system message when users join a room" rows="2"></textarea>
         </div>
         <div class="field">
@@ -580,12 +632,12 @@
           <input type="text" id="cfg-reg-inviteCode">
         </div>
         <div class="field">
-          <label for="cfg-reg-minPasswordLength">Minimum Password Length</label>
+          <label for="cfg-reg-minPasswordLength">Minimum Password Length <span class="tip" tabindex="0" data-tip="Applies to new passwords for registration and password reset. Existing passwords are not changed automatically.">?</span></label>
           <input type="number" id="cfg-reg-minPasswordLength" min="6" max="128">
           <div class="field-hint">Applies to new registrations</div>
         </div>
         <div class="field">
-          <label for="cfg-reg-emailAllowlist">Email Allowlist (one per line)</label>
+          <label for="cfg-reg-emailAllowlist">Email Allowlist (one per line) <span class="tip" tabindex="0" data-tip="If set, only these emails/domains can register. Examples: admin@example.com or @company.com.">?</span></label>
           <textarea id="cfg-reg-emailAllowlist" placeholder="@company.com"></textarea>
           <div class="field-hint">Leave empty to allow all emails</div>
         </div>
@@ -609,7 +661,7 @@
       <div class="card">
         <h3>Media (LiveKit)</h3>
         <div class="field">
-          <label for="cfg-lk-url">LiveKit URL</label>
+          <label for="cfg-lk-url">LiveKit URL <span class="tip" tabindex="0" data-tip="Use ws:// for local/direct setups and wss:// when behind HTTPS/reverse proxy. Clients read this from server info.">?</span></label>
           <input type="text" id="cfg-lk-url" placeholder="ws://your-server:7880">
           <div class="field-hint">WebSocket URL for the LiveKit server. Clients auto-discover this from the server.</div>
         </div>
@@ -648,7 +700,7 @@
       <div class="card">
         <h3>File Storage</h3>
         <div class="field">
-          <label for="cfg-files-storagePath">Storage Directory</label>
+          <label for="cfg-files-storagePath">Storage Directory <span class="tip" tabindex="0" data-tip="Folder where uploads are stored on disk. Use a persistent path with enough space and backup policy.">?</span></label>
           <input type="text" id="cfg-files-storagePath" placeholder="./uploads">
           <div class="field-hint">Absolute or relative path where uploaded files are saved</div>
         </div>
@@ -662,7 +714,7 @@
       <div class="card">
         <h3>Security</h3>
         <div class="inline-field">
-          <label>Trust Reverse Proxy</label>
+          <label>Trust Reverse Proxy <span class="tip" tabindex="0" data-tip="Enable this only when requests always pass through a trusted proxy (Nginx, Caddy, Cloudflare Tunnel). Needed for correct client IP/protocol handling.">?</span></label>
           <label class="toggle">
             <input type="checkbox" id="cfg-trustProxy">
             <span class="toggle-slider"></span>
@@ -685,11 +737,11 @@
           <div class="field-hint" style="margin-left:0;margin-top:4px">Only admins can log in when enabled</div>
         </div>
         <div class="field">
-          <label for="cfg-jwtExpiryDays">JWT Token Expiry (days)</label>
+          <label for="cfg-jwtExpiryDays">JWT Token Expiry (days) <span class="tip" tabindex="0" data-tip="How long login tokens stay valid. Lower values improve security but require users to sign in more often.">?</span></label>
           <input type="number" id="cfg-jwtExpiryDays" min="1" max="365">
         </div>
         <div class="field">
-          <label for="cfg-bcryptRounds">Password Hash Cost (bcrypt rounds)</label>
+          <label for="cfg-bcryptRounds">Password Hash Cost (bcrypt rounds) <span class="tip" tabindex="0" data-tip="Higher rounds are more secure but increase CPU cost during login/reset. 12 is a practical default for most servers.">?</span></label>
           <input type="number" id="cfg-bcryptRounds" min="10" max="15">
         </div>
         <div class="field">
@@ -705,22 +757,43 @@
           <input type="number" id="cfg-loginLockoutMinutes" min="1" max="1440">
         </div>
         <div class="field">
-          <label for="cfg-adminEmails">Admin Emails (one per line)</label>
+          <label for="cfg-adminEmails">Admin Emails (one per line) <span class="tip" tabindex="0" data-tip="Emails listed here get admin privileges at login. Ensure at least one reachable admin account is listed.">?</span></label>
           <textarea id="cfg-adminEmails" placeholder="admin@example.com"></textarea>
         </div>
         <div class="field">
-          <label for="cfg-cors-allowedOrigins">CORS Allowed Origins (one per line)</label>
+          <label for="cfg-cors-allowedOrigins">CORS Allowed Origins (one per line) <span class="tip" tabindex="0" data-tip="Browser origins allowed to call the API. Use exact origins in production. Wildcards are convenient but reduce isolation.">?</span></label>
           <textarea id="cfg-cors-allowedOrigins" placeholder="https://chat.sciphr.ca&#10;https://*.sciphr.ca&#10;*"></textarea>
           <div class="field-hint">Use exact origins, wildcard patterns (like https://*.example.com), or * to allow all browser origins.</div>
         </div>
         <div class="inline-field">
-          <label>Allow Requests With No Origin Header</label>
+          <label>Allow Requests With No Origin Header <span class="tip" tabindex="0" data-tip="Needed for native desktop clients and some server-to-server calls that do not send Origin. Disable only if you require strict browser-only origin checks.">?</span></label>
           <label class="toggle">
             <input type="checkbox" id="cfg-cors-allowNoOrigin">
             <span class="toggle-slider"></span>
           </label>
           <div class="field-hint" style="margin-left:0;margin-top:4px">Keep this enabled for desktop/native apps that do not send an Origin header.</div>
         </div>
+      </div>
+
+      <div class="card">
+        <h3>Password Reset Email (SMTP)</h3>
+        <div class="field">
+          <label>SMTP Provider <span class="tip" tabindex="0" data-tip="By default ChitChat uses Gmail SMTP (smtp.gmail.com:587 STARTTLS). You only need credentials unless you override host/port settings.">?</span></label>
+          <input type="text" value="Default: Gmail SMTP (smtp.gmail.com:587, STARTTLS)" disabled>
+        </div>
+        <div class="field">
+          <label>SMTP_USER <span class="tip" tabindex="0" data-tip="The sender account username, usually the full email address (example: yourname@gmail.com).">?</span></label>
+          <input type="text" value="Set as environment variable on the server" disabled>
+        </div>
+        <div class="field">
+          <label>SMTP_PASS <span class="tip" tabindex="0" data-tip="For Gmail, use a Google App Password (16 characters), not your normal Google account password.">?</span></label>
+          <input type="text" value="Set as environment variable on the server" disabled>
+        </div>
+        <div class="field">
+          <label>SMTP_FROM <span class="tip" tabindex="0" data-tip="The From address shown in reset emails. Typically the same mailbox as SMTP_USER.">?</span></label>
+          <input type="text" value="Set as environment variable on the server" disabled>
+        </div>
+        <div class="field-hint">After changing SMTP environment variables, restart the server service to apply them.</div>
       </div>
 
       <button class="btn btn-primary" id="save-config-btn">Save Configuration</button>
@@ -745,7 +818,7 @@
       </div>
       <div class="card">
         <table>
-          <thead><tr><th>Name</th><th>Type</th><th>Members</th><th>Messages</th><th>Created By</th><th>Access</th><th></th></tr></thead>
+          <thead><tr><th>Name</th><th>Type</th><th>Members</th><th>Messages</th><th>Created By</th><th>Retention</th><th>Access</th><th></th></tr></thead>
           <tbody id="rooms-table"></tbody>
         </table>
       </div>
@@ -886,6 +959,29 @@
   </div>
 </div>
 
+<div id="modal-room-retention" class="modal-overlay hidden">
+  <div class="modal" style="width:520px;max-width:95vw">
+    <h3 id="room-retention-title">Room Retention</h3>
+    <div class="field">
+      <label for="room-retention-mode">Retention Mode</label>
+      <select id="room-retention-mode">
+        <option value="inherit">Inherit server default</option>
+        <option value="never">Never auto-delete</option>
+        <option value="days">Auto-delete after N days</option>
+      </select>
+    </div>
+    <div class="field" id="room-retention-days-field">
+      <label for="room-retention-days">Keep Messages For (days)</label>
+      <input type="number" id="room-retention-days" min="1" max="3650" value="30">
+      <div class="field-hint">Pinned messages are excluded from retention cleanup.</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-sm" style="background:var(--border);color:var(--text-primary)" id="room-retention-cancel-btn">Cancel</button>
+      <button class="btn btn-primary btn-sm" id="room-retention-save-btn">Save</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (() => {
   // State
@@ -895,6 +991,7 @@
   let currentRoleState = { roles: [], userRoles: {}, roomPermissions: {} };
   let editingUserRolesUserId = null;
   let editingRoomPermissionsRoomId = null;
+  let editingRoomRetentionRoomId = null;
 
   // Helpers
   const $ = (sel) => document.querySelector(sel);
@@ -929,6 +1026,20 @@
     if (!iso) return '-';
     const d = new Date(iso + 'Z');
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  function formatRoomRetention(room) {
+    const mode = (room.message_retention_mode || 'inherit').toLowerCase();
+    const days = Number(room.message_retention_days || 0);
+    if (mode === 'never') return 'Never auto-delete';
+    if (mode === 'days' && Number.isFinite(days) && days > 0) {
+      return `${days} day${days === 1 ? '' : 's'}`;
+    }
+    const globalDays = Number(currentConfig?.messageRetentionDays || 0);
+    if (globalDays > 0) {
+      return `Inherit (${globalDays} day${globalDays === 1 ? '' : 's'})`;
+    }
+    return 'Inherit (disabled)';
   }
 
   // Auth
@@ -1229,6 +1340,7 @@
           <td><span class="status-dot ${u.status}"></span>${u.status}</td>
           <td>${formatDate(u.created_at)}</td>
           <td style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn btn-sm" style="background:var(--warning);color:#111827" onclick="window._sendResetEmail('${u.id}', '${esc(u.username)}')">Send reset</button>
             <button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="window._editUserRoles('${u.id}', '${esc(u.username)}')">Roles</button>
             ${currentUser && u.id !== currentUser.id ? `<button class="btn btn-danger btn-sm" onclick="window._deleteUser('${u.id}', '${esc(u.username)}')">Delete</button>` : ''}
           </td>
@@ -1252,6 +1364,21 @@
     });
   };
 
+  window._sendResetEmail = (id, name) => {
+    showConfirm(
+      `Send Password Reset`,
+      `Send a password reset email to "${name}"?`,
+      async () => {
+        try {
+          await api('POST', `/api/admin/users/${id}/password-reset`);
+          toast('Password reset email sent');
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      }
+    );
+  };
+
   // Rooms
   async function loadRooms() {
     try {
@@ -1266,8 +1393,12 @@
           <td>${r.members}</td>
           <td>${r.messages}</td>
           <td>${esc(r.created_by)}</td>
+          <td>${esc(formatRoomRetention(r))}</td>
           <td>${(r.type === 'text' || r.type === 'voice') ? `<button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="window._editRoomPermissions('${esc(r.id)}', '${esc(r.name)}', '${esc(r.type)}')">Permissions</button>` : '<span style="color:var(--text-muted)">n/a</span>'}</td>
-          <td><button class="btn btn-danger btn-sm" onclick="window._deleteRoom('${esc(r.id)}', '${esc(r.name)}')">Delete</button></td>
+          <td style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn btn-sm" style="background:var(--warning);color:#111827" onclick="window._editRoomRetention('${esc(r.id)}', '${esc(r.name)}', '${esc((r.message_retention_mode || 'inherit').toLowerCase())}', '${String(r.message_retention_days || '')}')">Retention</button>
+            <button class="btn btn-danger btn-sm" onclick="window._deleteRoom('${esc(r.id)}', '${esc(r.name)}')">Delete</button>
+          </td>
         </tr>
       `).join('');
     } catch (err) {
@@ -1408,6 +1539,48 @@
       toast(err.message, 'error');
     }
   };
+
+  function updateRoomRetentionDaysVisibility() {
+    const mode = $('#room-retention-mode').value;
+    if (mode === 'days') {
+      $('#room-retention-days-field').classList.remove('hidden');
+    } else {
+      $('#room-retention-days-field').classList.add('hidden');
+    }
+  }
+
+  window._editRoomRetention = (roomId, roomName, mode, days) => {
+    editingRoomRetentionRoomId = roomId;
+    $('#room-retention-title').textContent = `Retention: #${roomName}`;
+    $('#room-retention-mode').value = mode || 'inherit';
+    $('#room-retention-days').value = String(days || '30');
+    updateRoomRetentionDaysVisibility();
+    $('#modal-room-retention').classList.remove('hidden');
+  };
+
+  async function saveRoomRetention() {
+    if (!editingRoomRetentionRoomId) return;
+    const mode = $('#room-retention-mode').value;
+    const body = { mode };
+    if (mode === 'days') {
+      const parsedDays = parseInt($('#room-retention-days').value, 10);
+      if (!Number.isInteger(parsedDays) || parsedDays < 1 || parsedDays > 3650) {
+        toast('Retention days must be between 1 and 3650', 'error');
+        return;
+      }
+      body.days = parsedDays;
+    }
+
+    try {
+      await api('PUT', `/api/admin/rooms/${editingRoomRetentionRoomId}/retention`, body);
+      $('#modal-room-retention').classList.add('hidden');
+      editingRoomRetentionRoomId = null;
+      toast('Room retention updated');
+      loadRooms();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
 
   async function saveRoomPermissions() {
     if (!editingRoomPermissionsRoomId) return;
@@ -1573,6 +1746,12 @@
     $('#modal-room-perms').classList.add('hidden');
   });
   $('#room-perms-save-btn').addEventListener('click', saveRoomPermissions);
+  $('#room-retention-mode').addEventListener('change', updateRoomRetentionDaysVisibility);
+  $('#room-retention-cancel-btn').addEventListener('click', () => {
+    editingRoomRetentionRoomId = null;
+    $('#modal-room-retention').classList.add('hidden');
+  });
+  $('#room-retention-save-btn').addEventListener('click', saveRoomRetention);
   $('#confirm-cancel-btn').addEventListener('click', () => $('#modal-confirm').classList.add('hidden'));
   $('#confirm-ok-btn').addEventListener('click', () => {
     $('#modal-confirm').classList.add('hidden');

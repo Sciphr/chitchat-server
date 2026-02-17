@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   build-and-release:
+    name: Build ${{ matrix.out }}
     strategy:
       matrix:
         include:
@@ -40,6 +41,11 @@ jobs:
 
       - name: Build binary
         run: npx pkg dist/index.js --targets ${{ matrix.target }} --output bin/${{ matrix.out }} --compress GZip
+
+      - name: Verify server artifact exists
+        shell: bash
+        run: |
+          test -f "bin/${{ matrix.out }}"
 
       - name: Publish GitHub Release asset
         uses: softprops/action-gh-release@v2

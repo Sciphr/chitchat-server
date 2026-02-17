@@ -13,6 +13,13 @@ import {
 } from "../middleware/auth.js";
 import { broadcastPresence } from "../websocket/handler.js";
 import { getUserPermissions } from "../permissions.js";
+import {
+  consumePasswordResetToken,
+  createPasswordResetToken,
+  invalidateAllPasswordResetTokensForUser,
+  isMailConfigured,
+  sendPasswordResetEmail,
+} from "../services/passwordReset.js";
 
 const router = Router();
 const USERNAME_PATTERN = /^[a-zA-Z0-9._-]{2,32}$/;
@@ -28,6 +35,8 @@ type LoginAttempt = {
 };
 
 const loginAttempts = new Map<string, LoginAttempt>();
+const passwordResetRequestCooldownByKey = new Map<string, number>();
+const PASSWORD_RESET_REQUEST_COOLDOWN_MS = 30_000;
 
 function normalizeEmail(value: string): string {
   return value.trim().toLowerCase();
@@ -109,6 +118,21 @@ function clearLoginAttemptsForEmail(normalizedEmail: string) {
       loginAttempts.delete(key);
     }
   }
+}
+
+function getServerBaseUrl(req: Request): string {
+  const proto = req.protocol || "http";
+  const host = req.get("host") || "localhost";
+  return `${proto}://${host}`;
+}
+
+function canAcceptPasswordResetRequest(req: Request, normalizedEmail: string) {
+  const key = `${getClientIp(req)}|${normalizedEmail}`;
+  const now = Date.now();
+  const lastAt = passwordResetRequestCooldownByKey.get(key) || 0;
+  if (now - lastAt < PASSWORD_RESET_REQUEST_COOLDOWN_MS) return false;
+  passwordResetRequestCooldownByKey.set(key, now);
+  return true;
 }
 
 // POST /api/auth/register
@@ -404,6 +428,101 @@ router.post("/login", (req, res) => {
     token,
     user: { id: user.id, username: user.username, email: user.email, isAdmin, permissions },
   });
+});
+
+// POST /api/auth/password-reset/request
+router.post("/password-reset/request", async (req, res) => {
+  const email = typeof req.body?.email === "string" ? normalizeEmail(req.body.email) : "";
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    res.status(400).json({ error: "Valid email is required" });
+    return;
+  }
+
+  // Always return a generic success response to avoid account enumeration.
+  const genericResponse = {
+    ok: true,
+    message: "If an account exists for that email, a reset token has been sent.",
+  };
+
+  if (!canAcceptPasswordResetRequest(req, email)) {
+    res.json(genericResponse);
+    return;
+  }
+
+  if (!isMailConfigured()) {
+    res.json(genericResponse);
+    return;
+  }
+
+  const db = getDb();
+  const user = db
+    .prepare("SELECT id, username, email FROM users WHERE email = ?")
+    .get(email) as { id: string; username: string; email: string } | undefined;
+
+  if (!user) {
+    res.json(genericResponse);
+    return;
+  }
+
+  try {
+    const { token } = createPasswordResetToken(db, user.id, null);
+    await sendPasswordResetEmail({
+      to: user.email,
+      username: user.username,
+      token,
+      serverBaseUrl: getServerBaseUrl(req),
+    });
+  } catch (err) {
+    console.error("Password reset request failed:", err);
+  }
+
+  res.json(genericResponse);
+});
+
+// POST /api/auth/password-reset/confirm
+router.post("/password-reset/confirm", (req, res) => {
+  const token = typeof req.body?.token === "string" ? req.body.token.trim() : "";
+  const newPassword =
+    typeof req.body?.newPassword === "string" ? req.body.newPassword : "";
+  if (!token || token.length < 32) {
+    res.status(400).json({ error: "Invalid reset token" });
+    return;
+  }
+
+  const config = getConfig();
+  if (newPassword.length < config.registration.minPasswordLength) {
+    res.status(400).json({
+      error: `Password must be at least ${config.registration.minPasswordLength} characters`,
+    });
+    return;
+  }
+
+  const db = getDb();
+  const consumed = consumePasswordResetToken(db, token);
+  if (!consumed) {
+    res.status(400).json({ error: "Invalid or expired reset token" });
+    return;
+  }
+
+  const user = db
+    .prepare("SELECT id, email FROM users WHERE id = ?")
+    .get(consumed.userId) as { id: string; email: string } | undefined;
+  if (!user) {
+    res.status(400).json({ error: "Invalid reset token" });
+    return;
+  }
+
+  const passwordHash = bcrypt.hashSync(newPassword, config.bcryptRounds);
+  db.prepare(
+    `UPDATE users
+     SET password_hash = ?,
+         updated_at = datetime('now')
+     WHERE id = ?`
+  ).run(passwordHash, user.id);
+
+  invalidateAllPasswordResetTokensForUser(db, user.id);
+  clearLoginAttemptsForEmail(normalizeEmail(user.email));
+  res.json({ ok: true });
 });
 
 // POST /api/auth/login/2fa

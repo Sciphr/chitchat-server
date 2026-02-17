@@ -15,6 +15,7 @@ import livekitRoutes from "./routes/livekit.js";
 import filesRoutes from "./routes/files.js";
 import serverInfoRoutes from "./routes/serverInfo.js";
 import adminRoutes from "./routes/admin.js";
+import { runRetentionCleanup } from "./services/retention.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -202,22 +203,25 @@ async function main() {
   // Setup WebSocket handlers
   setupSocketHandlers(io);
 
-  // Message retention cleanup
-  if (config.messageRetentionDays > 0) {
-    const cleanup = () => {
-      const cutoff = new Date(
-        Date.now() - config.messageRetentionDays * 86400000
-      ).toISOString();
-      const result = db
-        .prepare("DELETE FROM messages WHERE created_at < ?")
-        .run(cutoff);
-      if (result.changes > 0) {
-        console.log(`  Retention: pruned ${result.changes} old messages`);
-      }
-    };
-    cleanup(); // run once on startup
-    setInterval(cleanup, 3600000); // then hourly
-  }
+  // Message retention cleanup (server default + per-room overrides).
+  const cleanup = () => {
+    const activeConfig = getConfig();
+    const result = runRetentionCleanup(db, activeConfig);
+    if (
+      result.messagesDeleted > 0 ||
+      result.orphanAttachmentsDeleted > 0 ||
+      result.orphanFilesDeleted > 0
+    ) {
+      console.log(
+        `  Retention: deleted ${result.messagesDeleted} messages, ` +
+          `${result.orphanAttachmentsDeleted} orphan attachment rows, ` +
+          `${result.orphanFilesDeleted} orphan files ` +
+          `(rooms with retention: ${result.roomsWithRetention}/${result.roomsEvaluated})`
+      );
+    }
+  };
+  cleanup(); // run once on startup
+  setInterval(cleanup, 3600000); // then hourly
 
   // Start server
   httpServer.listen(config.port, () => {

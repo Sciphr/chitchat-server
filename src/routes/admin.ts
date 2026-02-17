@@ -9,6 +9,11 @@ import {
 import { requireAuth, requireAdmin } from "../middleware/auth.js";
 import { getDb } from "../db/database.js";
 import { broadcastRoomStructure } from "../websocket/handler.js";
+import {
+  createPasswordResetToken,
+  isMailConfigured,
+  sendPasswordResetEmail,
+} from "../services/passwordReset.js";
 
 const router = Router();
 
@@ -311,6 +316,51 @@ router.get("/users", requireAuth, requireAdmin, (_req, res) => {
   res.json(users);
 });
 
+// POST /api/admin/users/:id/password-reset - send a password reset email
+router.post("/users/:id/password-reset", requireAuth, requireAdmin, async (req, res) => {
+  if (!isMailConfigured()) {
+    res.status(503).json({
+      error:
+        "Email is not configured. Set SMTP_USER, SMTP_PASS, and SMTP_FROM (SMTP_HOST/SMTP_PORT/SMTP_SECURE are optional and default to Gmail).",
+    });
+    return;
+  }
+
+  const db = getDb();
+  const targetUser = db
+    .prepare("SELECT id, username, email FROM users WHERE id = ?")
+    .get(req.params.id) as
+    | { id: string; username: string; email: string }
+    | undefined;
+
+  if (!targetUser) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+
+  const adminUserId = (req as any).user.userId as string;
+  const adminUser = db
+    .prepare("SELECT username FROM users WHERE id = ?")
+    .get(adminUserId) as { username: string } | undefined;
+
+  try {
+    const { token } = createPasswordResetToken(db, targetUser.id, adminUserId);
+    const proto = req.protocol || "http";
+    const host = req.get("host") || "localhost";
+    await sendPasswordResetEmail({
+      to: targetUser.email,
+      username: targetUser.username,
+      token,
+      serverBaseUrl: `${proto}://${host}`,
+      requestedByUsername: adminUser?.username || "Admin",
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Admin password reset send failed:", err);
+    res.status(500).json({ error: "Failed to send password reset email" });
+  }
+});
+
 // DELETE /api/admin/users/:id — delete a user
 router.delete("/users/:id", requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
@@ -337,12 +387,59 @@ router.get("/rooms", requireAuth, requireAdmin, (_req, res) => {
   const rooms = db
     .prepare(
       `SELECT r.id, r.name, r.type, r.created_by, r.created_at,
+              r.message_retention_mode, r.message_retention_days,
               (SELECT COUNT(*) FROM room_members WHERE room_id = r.id) as members,
               (SELECT COUNT(*) FROM messages WHERE room_id = r.id) as messages
        FROM rooms r ORDER BY r.created_at ASC`
     )
     .all();
   res.json(rooms);
+});
+
+// PUT /api/admin/rooms/:id/retention — set room message retention policy
+router.put("/rooms/:id/retention", requireAuth, requireAdmin, (req, res) => {
+  const db = getDb();
+  const room = db
+    .prepare("SELECT id FROM rooms WHERE id = ?")
+    .get(req.params.id) as { id: string } | undefined;
+  if (!room) {
+    res.status(404).json({ error: "Room not found" });
+    return;
+  }
+
+  const modeRaw =
+    typeof req.body?.mode === "string" ? req.body.mode.trim().toLowerCase() : "";
+  if (!["inherit", "never", "days"].includes(modeRaw)) {
+    res.status(400).json({ error: "mode must be one of: inherit, never, days" });
+    return;
+  }
+
+  let days: number | null = null;
+  if (modeRaw === "days") {
+    const parsed = Number(req.body?.days);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 3650) {
+      res.status(400).json({ error: "days must be an integer between 1 and 3650" });
+      return;
+    }
+    days = parsed;
+  }
+
+  db.prepare(
+    `UPDATE rooms
+     SET message_retention_mode = ?,
+         message_retention_days = ?
+     WHERE id = ?`
+  ).run(modeRaw, days, req.params.id);
+
+  const updated = db
+    .prepare(
+      `SELECT id, name, type, created_by, created_at,
+              message_retention_mode, message_retention_days
+       FROM rooms
+       WHERE id = ?`
+    )
+    .get(req.params.id);
+  res.json(updated);
 });
 
 // POST /api/admin/rooms — create a room
