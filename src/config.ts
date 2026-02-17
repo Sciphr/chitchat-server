@@ -51,6 +51,13 @@ interface CorsConfig {
   allowNoOrigin: boolean;
 }
 
+interface GiphyConfig {
+  enabled: boolean;
+  apiKey: string;
+  rating: "g" | "pg" | "pg-13" | "r";
+  maxResults: number;
+}
+
 export interface ServerConfig {
   serverName: string;
   serverDescription: string;
@@ -79,6 +86,7 @@ export interface ServerConfig {
   adminEmails: string[];
   livekit: LiveKitConfig;
   files: FilesConfig;
+  giphy: GiphyConfig;
   cors: CorsConfig;
 }
 
@@ -141,6 +149,12 @@ const DEFAULT_CONFIG: ServerConfig = {
       timeoutMs: 15000,
       failClosed: true,
     },
+  },
+  giphy: {
+    enabled: false,
+    apiKey: "",
+    rating: "pg",
+    maxResults: 20,
   },
   cors: {
     allowedOrigins: [
@@ -302,6 +316,20 @@ export function loadConfig(): ServerConfig {
     merged.files.stripImageExif =
       process.env.FILES_STRIP_IMAGE_EXIF.toLowerCase() === "true";
   }
+  if (process.env.GIPHY_ENABLED) {
+    merged.giphy.enabled = process.env.GIPHY_ENABLED.toLowerCase() === "true";
+  }
+  if (process.env.GIPHY_API_KEY) {
+    merged.giphy.apiKey = process.env.GIPHY_API_KEY.trim();
+  }
+  if (process.env.GIPHY_RATING) {
+    merged.giphy.rating = process.env.GIPHY_RATING
+      .toLowerCase()
+      .trim() as GiphyConfig["rating"];
+  }
+  if (process.env.GIPHY_MAX_RESULTS) {
+    merged.giphy.maxResults = parseInt(process.env.GIPHY_MAX_RESULTS, 10);
+  }
   merged.cors = sanitizeCorsConfig(merged.cors);
   if (process.env.REGISTRATION_MIN_PASSWORD_LENGTH) {
     merged.registration.minPasswordLength = parseInt(
@@ -371,6 +399,16 @@ export function loadConfig(): ServerConfig {
   if (!merged.files.antivirus.clamavHost?.trim()) {
     merged.files.antivirus.clamavHost = "127.0.0.1";
   }
+  if (!["g", "pg", "pg-13", "r"].includes(merged.giphy.rating)) {
+    merged.giphy.rating = "pg";
+  }
+  if (
+    !Number.isInteger(merged.giphy.maxResults) ||
+    merged.giphy.maxResults < 1 ||
+    merged.giphy.maxResults > 50
+  ) {
+    merged.giphy.maxResults = 20;
+  }
 
   // Write config back (saves generated JWT secret, fills in any new fields)
   try {
@@ -418,6 +456,12 @@ export function getRedactedConfig(): ServerConfig {
         failClosed: cfg.files.antivirus.failClosed,
       },
     },
+    giphy: {
+      enabled: cfg.giphy.enabled,
+      apiKey: cfg.giphy.apiKey ? REDACTED : "",
+      rating: cfg.giphy.rating,
+      maxResults: cfg.giphy.maxResults,
+    },
   };
 }
 
@@ -448,6 +492,11 @@ export function updateConfig(
     if (lk.apiKey === REDACTED) delete lk.apiKey;
     if (lk.apiSecret === REDACTED) delete lk.apiSecret;
     if (Object.keys(lk).length === 0) delete partial.livekit;
+  }
+  if (partial.giphy) {
+    const giphy = partial.giphy as Partial<GiphyConfig>;
+    if (giphy.apiKey === REDACTED) delete giphy.apiKey;
+    if (Object.keys(giphy).length === 0) delete partial.giphy;
   }
 
   const updated: ServerConfig = deepMerge(config, partial);

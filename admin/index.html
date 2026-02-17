@@ -802,6 +802,35 @@
       </div>
 
       <div class="card">
+        <h3>GIF Search (GIPHY)</h3>
+        <div class="inline-field">
+          <label>Enable GIF Search <span class="tip" tabindex="0" data-tip="When disabled, users will not see GIF search in the message composer.">?</span></label>
+          <label class="toggle">
+            <input type="checkbox" id="cfg-giphy-enabled">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="field">
+          <label for="cfg-giphy-apiKey">GIPHY API Key <span class="tip" tabindex="0" data-tip="Create this in your GIPHY developer dashboard. This is stored server-side and never sent to clients.">?</span></label>
+          <input type="text" id="cfg-giphy-apiKey" placeholder="your_giphy_api_key">
+          <div class="field-hint">Shown redacted after save. Enter a new value only when rotating the key.</div>
+        </div>
+        <div class="field">
+          <label for="cfg-giphy-rating">Max Content Rating</label>
+          <select id="cfg-giphy-rating">
+            <option value="g">G</option>
+            <option value="pg">PG</option>
+            <option value="pg-13">PG-13</option>
+            <option value="r">R</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="cfg-giphy-maxResults">Max Results per Query</label>
+          <input type="number" id="cfg-giphy-maxResults" min="1" max="50">
+        </div>
+      </div>
+
+      <div class="card">
         <h3>Backups & Restore</h3>
         <div class="field-hint" style="margin-bottom:12px">
           Backups are encrypted client-side with your passphrase before download. Keep the passphrase safe; it cannot be recovered.
@@ -1498,6 +1527,12 @@
         $('#files-av-status').textContent = 'Scanner status not checked yet.';
         $('#files-av-status').style.color = 'var(--text-muted)';
       }
+      if (currentConfig.giphy) {
+        $('#cfg-giphy-enabled').checked = currentConfig.giphy.enabled === true;
+        $('#cfg-giphy-apiKey').value = currentConfig.giphy.apiKey || '';
+        $('#cfg-giphy-rating').value = currentConfig.giphy.rating || 'pg';
+        $('#cfg-giphy-maxResults').value = currentConfig.giphy.maxResults || 20;
+      }
     } catch (err) {
       toast(err.message, 'error');
     }
@@ -1561,6 +1596,12 @@
           timeoutMs: parseInt($('#cfg-files-av-timeoutMs').value, 10) || 15000,
           failClosed: $('#cfg-files-av-failClosed').checked,
         },
+      },
+      giphy: {
+        enabled: $('#cfg-giphy-enabled').checked,
+        apiKey: $('#cfg-giphy-apiKey').value.trim(),
+        rating: $('#cfg-giphy-rating').value,
+        maxResults: parseInt($('#cfg-giphy-maxResults').value, 10) || 20,
       },
     };
 

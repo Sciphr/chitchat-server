@@ -29,6 +29,9 @@ router.get("/info", (_req, res) => {
     fileLimits: {
       maxUploadSizeMB: config.files.maxUploadSizeMB,
     },
+    gifs: {
+      enabled: config.giphy.enabled && Boolean(config.giphy.apiKey),
+    },
   });
 });
 

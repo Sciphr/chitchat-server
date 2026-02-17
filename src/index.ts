@@ -13,6 +13,7 @@ import authRoutes from "./routes/auth.js";
 import roomsRoutes from "./routes/rooms.js";
 import livekitRoutes from "./routes/livekit.js";
 import filesRoutes from "./routes/files.js";
+import gifsRoutes from "./routes/gifs.js";
 import serverInfoRoutes from "./routes/serverInfo.js";
 import adminRoutes from "./routes/admin.js";
 import { runRetentionCleanup } from "./services/retention.js";
@@ -233,6 +234,7 @@ async function main() {
   app.use("/api/rooms", roomsRoutes);
   app.use("/api/livekit", livekitRoutes);
   app.use("/api/files", filesRoutes);
+  app.use("/api/gifs", gifsRoutes);
   app.use("/api/server", serverInfoRoutes);
   app.use("/api/admin", adminRoutes);
 

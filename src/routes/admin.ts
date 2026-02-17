@@ -330,6 +330,40 @@ router.put("/config", requireAuth, requireAdmin, (req, res) => {
     }
   }
 
+  if (partial.giphy) {
+    if (
+      partial.giphy.enabled !== undefined &&
+      typeof partial.giphy.enabled !== "boolean"
+    ) {
+      res.status(400).json({ error: "giphy.enabled must be a boolean" });
+      return;
+    }
+    if (
+      partial.giphy.apiKey !== undefined &&
+      typeof partial.giphy.apiKey !== "string"
+    ) {
+      res.status(400).json({ error: "giphy.apiKey must be a string" });
+      return;
+    }
+    if (
+      partial.giphy.rating !== undefined &&
+      !["g", "pg", "pg-13", "r"].includes(partial.giphy.rating)
+    ) {
+      res.status(400).json({ error: "giphy.rating must be one of: g, pg, pg-13, r" });
+      return;
+    }
+    if (
+      partial.giphy.maxResults !== undefined &&
+      (typeof partial.giphy.maxResults !== "number" ||
+        !Number.isInteger(partial.giphy.maxResults) ||
+        partial.giphy.maxResults < 1 ||
+        partial.giphy.maxResults > 50)
+    ) {
+      res.status(400).json({ error: "giphy.maxResults must be an integer between 1 and 50" });
+      return;
+    }
+  }
+
   // Validate LiveKit media limits
   if (partial.livekit) {
     const validScreenRes = ["720p", "1080p", "1440p", "4k"];
