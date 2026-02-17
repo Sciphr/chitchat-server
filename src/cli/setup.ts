@@ -98,9 +98,14 @@ export function needsSetup(): boolean {
       .prepare("SELECT 1 FROM users WHERE email = ?")
       .get(adminEmail);
     if (!exists) return true;
-  } catch {
-    // DB might not exist yet, setup needed
-    return true;
+  } catch (err) {
+    // Do not silently fall back to interactive setup for DB/runtime errors.
+    // Setup should only trigger for true first-run conditions.
+    console.error(
+      "  Setup check failed while reading database; skipping auto-setup and continuing startup.",
+      err
+    );
+    return false;
   }
 
   return false;

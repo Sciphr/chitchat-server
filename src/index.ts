@@ -22,9 +22,10 @@ const __dirname = path.dirname(__filename);
 async function main() {
   const args = process.argv.slice(2);
   const forceSetup = args.includes("--setup");
+  const migrateOnly = args.includes("--migrate-only");
 
   // First-run setup: detect if admin account exists, prompt if not
-  if (forceSetup || needsSetup()) {
+  if (!migrateOnly && (forceSetup || needsSetup())) {
     const flags = parseSetupFlags(args);
     await runSetup(flags);
   }
@@ -35,6 +36,11 @@ async function main() {
   // Initialize database
   const db = getDb();
   console.log(`  Database: ${db.name}`);
+  if (migrateOnly) {
+    console.log("  Migration preflight complete (--migrate-only)");
+    closeDb();
+    process.exit(0);
+  }
 
   const app = express();
   const httpServer = createServer(app);
