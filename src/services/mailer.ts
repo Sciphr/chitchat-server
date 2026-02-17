@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { getConfig } from "../config.js";
 
 type MailConfig = {
   host: string;
@@ -10,27 +11,14 @@ type MailConfig = {
 };
 
 function readMailConfig(): MailConfig | null {
-  const host = (process.env.SMTP_HOST || "smtp.gmail.com").trim();
-  const user = (process.env.SMTP_USER || "").trim();
-  const pass = process.env.SMTP_PASS || "";
-  const from = (process.env.SMTP_FROM || "").trim();
-  const portRaw = (process.env.SMTP_PORT || "").trim();
-  const secureRaw = (process.env.SMTP_SECURE || "").trim().toLowerCase();
-
+  const smtp = getConfig().smtp;
+  const host = (smtp.host || "smtp.gmail.com").trim();
+  const user = (smtp.user || "").trim();
+  const pass = smtp.pass || "";
+  const from = (smtp.from || "").trim();
   if (!host || !user || !pass || !from) return null;
-
-  let port = 587;
-  if (portRaw) {
-    const parsed = Number(portRaw);
-    if (Number.isFinite(parsed) && parsed > 0 && parsed <= 65535) {
-      port = parsed;
-    }
-  }
-
-  const secure = secureRaw
-    ? secureRaw === "1" || secureRaw === "true" || secureRaw === "yes"
-    : false;
-
+  const port = Number.isFinite(smtp.port) ? smtp.port : 587;
+  const secure = smtp.secure === true;
   return { host, port, secure, user, pass, from };
 }
 
@@ -47,7 +35,7 @@ export async function sendMail(input: {
   const cfg = readMailConfig();
   if (!cfg) {
     throw new Error(
-      "Email is not configured. Set SMTP_USER, SMTP_PASS, and SMTP_FROM (SMTP_HOST/SMTP_PORT/SMTP_SECURE are optional and default to Gmail)."
+      "Email is not configured. Set SMTP settings in Admin > Configuration > Password Reset Email (SMTP)."
     );
   }
 

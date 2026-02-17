@@ -255,6 +255,7 @@ if [ "${INSTALL_CLAMAV}" = "true" ]; then
   info "Installing ClamAV (upload malware scanning)..."
   CLAMAV_SOCKET=""
   CLAMD_CONFIG=""
+  CLAMAV_BRIDGE_SERVICE="clamd-tcp-bridge"
   if command -v apt-get &> /dev/null; then
     apt-get update -qq && apt-get install -y -qq clamav clamav-daemon > /dev/null
   elif command -v dnf &> /dev/null; then
@@ -327,13 +328,80 @@ if [ "${INSTALL_CLAMAV}" = "true" ]; then
         if [ "${CLAMAV_READY}" = "true" ]; then
           ok "ClamAV service is active (${CLAMAV_SERVICE}) and listening on ${CLAMAV_HOST}:${CLAMAV_PORT}"
         else
-          warn "ClamAV service is active (${CLAMAV_SERVICE}) but TCP ${CLAMAV_PORT} is not listening yet. Upload scanning will remain disabled."
+          warn "ClamAV service is active (${CLAMAV_SERVICE}) but TCP ${CLAMAV_PORT} is not listening yet. Trying TCP bridge..."
         fi
       else
-        warn "ClamAV service is not active (${CLAMAV_SERVICE}). Upload scanning will remain disabled."
+        warn "ClamAV service is not active (${CLAMAV_SERVICE}). Trying socket/bridge fallback..."
       fi
     else
-      warn "ClamAV service unit was not found. Upload scanning will remain disabled."
+      warn "ClamAV service unit was not found. Trying clamd process/socket fallback..."
+    fi
+
+    # Fallback for Debian/Pi socket-only setups:
+    # if clamd is running via unix socket but TCP is unavailable, bridge 127.0.0.1:3310 -> clamd.ctl
+    if [ "${CLAMAV_READY}" != "true" ]; then
+      CLAMD_UNIX_SOCKET=""
+      for sock in /run/clamav/clamd.ctl /var/run/clamav/clamd.ctl; do
+        if [ -S "$sock" ]; then
+          CLAMD_UNIX_SOCKET="$sock"
+          break
+        fi
+      done
+
+      if [ -z "${CLAMD_UNIX_SOCKET}" ] && pgrep -x clamd >/dev/null 2>&1; then
+        CLAMD_UNIX_SOCKET="/run/clamav/clamd.ctl"
+      fi
+
+      if [ -n "${CLAMD_UNIX_SOCKET}" ]; then
+        info "Configuring ClamAV TCP bridge (${CLAMAV_HOST}:${CLAMAV_PORT} -> ${CLAMD_UNIX_SOCKET})..."
+        if ! command -v socat >/dev/null 2>&1; then
+          if command -v apt-get &> /dev/null; then
+            apt-get update -qq && apt-get install -y -qq socat > /dev/null
+          elif command -v dnf &> /dev/null; then
+            dnf install -y -q socat > /dev/null
+          elif command -v yum &> /dev/null; then
+            yum install -y -q socat > /dev/null
+          else
+            warn "Could not auto-install socat for ClamAV TCP bridge."
+          fi
+        fi
+
+        if command -v socat >/dev/null 2>&1; then
+          cat > "/etc/systemd/system/${CLAMAV_BRIDGE_SERVICE}.service" << EOF
+[Unit]
+Description=ClamAV TCP bridge (${CLAMAV_PORT} -> ${CLAMD_UNIX_SOCKET})
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/socat TCP-LISTEN:${CLAMAV_PORT},bind=${CLAMAV_HOST},reuseaddr,fork UNIX-CONNECT:${CLAMD_UNIX_SOCKET}
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target
+EOF
+          systemctl daemon-reload
+          systemctl enable "${CLAMAV_BRIDGE_SERVICE}" --quiet || true
+          systemctl restart "${CLAMAV_BRIDGE_SERVICE}" || true
+          sleep 1
+        fi
+      fi
+    fi
+
+    if [ "${CLAMAV_READY}" != "true" ] && command -v ss >/dev/null 2>&1; then
+      for _ in $(seq 1 10); do
+        if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "(:|\\.)${CLAMAV_PORT}$"; then
+          CLAMAV_READY=true
+          break
+        fi
+        sleep 1
+      done
+      if [ "${CLAMAV_READY}" = "true" ]; then
+        ok "ClamAV TCP endpoint ready at ${CLAMAV_HOST}:${CLAMAV_PORT}"
+      else
+        warn "ClamAV TCP endpoint is still unavailable on ${CLAMAV_HOST}:${CLAMAV_PORT}. Upload scanning will remain disabled."
+      fi
     fi
   fi
 else

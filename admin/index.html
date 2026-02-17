@@ -961,22 +961,42 @@
       <div class="card">
         <h3>Password Reset Email (SMTP)</h3>
         <div class="field">
-          <label>SMTP Provider <span class="tip" tabindex="0" data-tip="By default ChitChat uses Gmail SMTP (smtp.gmail.com:587 STARTTLS). You only need credentials unless you override host/port settings.">?</span></label>
-          <input type="text" value="Default: Gmail SMTP (smtp.gmail.com:587, STARTTLS)" disabled>
+          <label for="cfg-smtp-host">SMTP Host <span class="tip" tabindex="0" data-tip="By default ChitChat uses Gmail SMTP (smtp.gmail.com:587 STARTTLS).">?</span></label>
+          <input type="text" id="cfg-smtp-host" placeholder="smtp.gmail.com">
         </div>
         <div class="field">
-          <label>SMTP_USER <span class="tip" tabindex="0" data-tip="The sender account username, usually the full email address (example: yourname@gmail.com).">?</span></label>
-          <input type="text" value="Set as environment variable on the server" disabled>
+          <label for="cfg-smtp-port">SMTP Port</label>
+          <input type="number" id="cfg-smtp-port" min="1" max="65535" placeholder="587">
+        </div>
+        <div class="inline-field">
+          <label>SMTP Secure (TLS on connect)</label>
+          <label class="toggle">
+            <input type="checkbox" id="cfg-smtp-secure">
+            <span class="toggle-slider"></span>
+          </label>
         </div>
         <div class="field">
-          <label>SMTP_PASS <span class="tip" tabindex="0" data-tip="For Gmail, use a Google App Password (16 characters), not your normal Google account password.">?</span></label>
-          <input type="text" value="Set as environment variable on the server" disabled>
+          <label for="cfg-smtp-user">SMTP User <span class="tip" tabindex="0" data-tip="The sender account username, usually the full email address (example: yourname@gmail.com).">?</span></label>
+          <input type="text" id="cfg-smtp-user" placeholder="yourname@gmail.com">
         </div>
         <div class="field">
-          <label>SMTP_FROM <span class="tip" tabindex="0" data-tip="The From address shown in reset emails. Typically the same mailbox as SMTP_USER.">?</span></label>
-          <input type="text" value="Set as environment variable on the server" disabled>
+          <label for="cfg-smtp-pass">SMTP Password <span class="tip" tabindex="0" data-tip="For Gmail, use a Google App Password (16 characters), not your normal Google password.">?</span></label>
+          <input type="password" id="cfg-smtp-pass" placeholder="App password or SMTP password">
+          <div class="field-hint">Shown redacted after save. Enter a new value only when rotating credentials.</div>
         </div>
-        <div class="field-hint">After changing SMTP environment variables, restart the server service to apply them.</div>
+        <div class="field">
+          <label for="cfg-smtp-from">SMTP From Address <span class="tip" tabindex="0" data-tip="The From address shown in reset emails. Usually same as SMTP user.">?</span></label>
+          <input type="text" id="cfg-smtp-from" placeholder="noreply@example.com">
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Server Process</h3>
+        <div class="field-hint" style="margin-bottom:12px">
+          Applies updated runtime settings immediately by restarting the server process. Existing connections briefly reconnect.
+        </div>
+        <button class="btn btn-sm" style="background:var(--border);color:var(--text-primary)" id="restart-server-btn">Restart Server Service</button>
+        <div class="field-hint" id="restart-server-status" style="margin-top:10px">No restart requested.</div>
       </div>
 
       <button class="btn btn-primary" id="save-config-btn">Save Configuration</button>
@@ -1533,6 +1553,14 @@
         $('#cfg-giphy-rating').value = currentConfig.giphy.rating || 'pg';
         $('#cfg-giphy-maxResults').value = currentConfig.giphy.maxResults || 20;
       }
+      if (currentConfig.smtp) {
+        $('#cfg-smtp-host').value = currentConfig.smtp.host || 'smtp.gmail.com';
+        $('#cfg-smtp-port').value = currentConfig.smtp.port || 587;
+        $('#cfg-smtp-secure').checked = currentConfig.smtp.secure === true;
+        $('#cfg-smtp-user').value = currentConfig.smtp.user || '';
+        $('#cfg-smtp-pass').value = currentConfig.smtp.pass || '';
+        $('#cfg-smtp-from').value = currentConfig.smtp.from || '';
+      }
     } catch (err) {
       toast(err.message, 'error');
     }
@@ -1603,6 +1631,14 @@
         rating: $('#cfg-giphy-rating').value,
         maxResults: parseInt($('#cfg-giphy-maxResults').value, 10) || 20,
       },
+      smtp: {
+        host: $('#cfg-smtp-host').value.trim() || 'smtp.gmail.com',
+        port: parseInt($('#cfg-smtp-port').value, 10) || 587,
+        secure: $('#cfg-smtp-secure').checked,
+        user: $('#cfg-smtp-user').value.trim(),
+        pass: $('#cfg-smtp-pass').value,
+        from: $('#cfg-smtp-from').value.trim(),
+      },
     };
 
     try {
@@ -1668,6 +1704,24 @@
       window.alert(msg);
     } catch (err) {
       toast(err.message, 'error');
+    }
+  }
+
+  async function restartServerProcess() {
+    try {
+      $('#restart-server-status').textContent = 'Restart requested...';
+      $('#restart-server-status').style.color = 'var(--warning)';
+      await api('POST', '/api/admin/restart');
+      $('#restart-server-status').textContent = 'Restart requested. Reload this page in a few seconds.';
+      $('#restart-server-status').style.color = 'var(--success)';
+      toast('Server restart requested');
+      setTimeout(() => {
+        window.location.reload();
+      }, 4000);
+    } catch (err) {
+      $('#restart-server-status').textContent = `Restart failed: ${err.message}`;
+      $('#restart-server-status').style.color = 'var(--danger)';
+      toast(`Restart failed: ${err.message}`, 'error');
     }
   }
 
@@ -2380,6 +2434,7 @@
   $('#logout-btn').addEventListener('click', logout);
   $('#save-config-btn').addEventListener('click', saveConfig);
   $('#cfg-files-av-enabled').addEventListener('change', updateFilesAvFieldsVisibility);
+  $('#restart-server-btn').addEventListener('click', restartServerProcess);
   $('#files-av-test-btn').addEventListener('click', testFilesAvConnection);
   $('#files-av-install-help-btn').addEventListener('click', showFilesAvInstallHelp);
   $('#backup-export-show-passphrase').addEventListener('change', () => {

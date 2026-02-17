@@ -51,6 +51,15 @@ interface CorsConfig {
   allowNoOrigin: boolean;
 }
 
+interface SmtpConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  from: string;
+}
+
 interface GiphyConfig {
   enabled: boolean;
   apiKey: string;
@@ -86,6 +95,7 @@ export interface ServerConfig {
   adminEmails: string[];
   livekit: LiveKitConfig;
   files: FilesConfig;
+  smtp: SmtpConfig;
   giphy: GiphyConfig;
   cors: CorsConfig;
 }
@@ -149,6 +159,14 @@ const DEFAULT_CONFIG: ServerConfig = {
       timeoutMs: 15000,
       failClosed: true,
     },
+  },
+  smtp: {
+    host: "smtp.gmail.com",
+    port: 587,
+    secure: false,
+    user: "",
+    pass: "",
+    from: "",
   },
   giphy: {
     enabled: false,
@@ -316,6 +334,15 @@ export function loadConfig(): ServerConfig {
     merged.files.stripImageExif =
       process.env.FILES_STRIP_IMAGE_EXIF.toLowerCase() === "true";
   }
+  if (process.env.SMTP_HOST) merged.smtp.host = process.env.SMTP_HOST.trim();
+  if (process.env.SMTP_PORT) merged.smtp.port = parseInt(process.env.SMTP_PORT, 10);
+  if (process.env.SMTP_SECURE) {
+    const value = process.env.SMTP_SECURE.toLowerCase().trim();
+    merged.smtp.secure = value === "1" || value === "true" || value === "yes";
+  }
+  if (process.env.SMTP_USER) merged.smtp.user = process.env.SMTP_USER.trim();
+  if (process.env.SMTP_PASS) merged.smtp.pass = process.env.SMTP_PASS;
+  if (process.env.SMTP_FROM) merged.smtp.from = process.env.SMTP_FROM.trim();
   if (process.env.GIPHY_ENABLED) {
     merged.giphy.enabled = process.env.GIPHY_ENABLED.toLowerCase() === "true";
   }
@@ -399,6 +426,16 @@ export function loadConfig(): ServerConfig {
   if (!merged.files.antivirus.clamavHost?.trim()) {
     merged.files.antivirus.clamavHost = "127.0.0.1";
   }
+  if (
+    !Number.isInteger(merged.smtp.port) ||
+    merged.smtp.port < 1 ||
+    merged.smtp.port > 65535
+  ) {
+    merged.smtp.port = merged.smtp.secure ? 465 : 587;
+  }
+  if (!merged.smtp.host?.trim()) {
+    merged.smtp.host = "smtp.gmail.com";
+  }
   if (!["g", "pg", "pg-13", "r"].includes(merged.giphy.rating)) {
     merged.giphy.rating = "pg";
   }
@@ -456,6 +493,14 @@ export function getRedactedConfig(): ServerConfig {
         failClosed: cfg.files.antivirus.failClosed,
       },
     },
+    smtp: {
+      host: cfg.smtp.host,
+      port: cfg.smtp.port,
+      secure: cfg.smtp.secure,
+      user: cfg.smtp.user,
+      pass: cfg.smtp.pass ? REDACTED : "",
+      from: cfg.smtp.from,
+    },
     giphy: {
       enabled: cfg.giphy.enabled,
       apiKey: cfg.giphy.apiKey ? REDACTED : "",
@@ -492,6 +537,11 @@ export function updateConfig(
     if (lk.apiKey === REDACTED) delete lk.apiKey;
     if (lk.apiSecret === REDACTED) delete lk.apiSecret;
     if (Object.keys(lk).length === 0) delete partial.livekit;
+  }
+  if (partial.smtp) {
+    const smtp = partial.smtp as Partial<SmtpConfig>;
+    if (smtp.pass === REDACTED) delete smtp.pass;
+    if (Object.keys(smtp).length === 0) delete partial.smtp;
   }
   if (partial.giphy) {
     const giphy = partial.giphy as Partial<GiphyConfig>;

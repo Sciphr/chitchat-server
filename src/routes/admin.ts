@@ -252,6 +252,54 @@ router.put("/config", requireAuth, requireAdmin, (req, res) => {
     }
   }
 
+  if (partial.smtp) {
+    if (
+      partial.smtp.host !== undefined &&
+      (typeof partial.smtp.host !== "string" || !partial.smtp.host.trim())
+    ) {
+      res.status(400).json({ error: "smtp.host must be a non-empty string" });
+      return;
+    }
+    if (
+      partial.smtp.port !== undefined &&
+      (typeof partial.smtp.port !== "number" ||
+        !Number.isInteger(partial.smtp.port) ||
+        partial.smtp.port < 1 ||
+        partial.smtp.port > 65535)
+    ) {
+      res.status(400).json({ error: "smtp.port must be an integer between 1 and 65535" });
+      return;
+    }
+    if (
+      partial.smtp.secure !== undefined &&
+      typeof partial.smtp.secure !== "boolean"
+    ) {
+      res.status(400).json({ error: "smtp.secure must be a boolean" });
+      return;
+    }
+    if (
+      partial.smtp.user !== undefined &&
+      typeof partial.smtp.user !== "string"
+    ) {
+      res.status(400).json({ error: "smtp.user must be a string" });
+      return;
+    }
+    if (
+      partial.smtp.pass !== undefined &&
+      typeof partial.smtp.pass !== "string"
+    ) {
+      res.status(400).json({ error: "smtp.pass must be a string" });
+      return;
+    }
+    if (
+      partial.smtp.from !== undefined &&
+      typeof partial.smtp.from !== "string"
+    ) {
+      res.status(400).json({ error: "smtp.from must be a string" });
+      return;
+    }
+  }
+
   // Validate file storage limits
   if (partial.files) {
     if (
@@ -506,7 +554,7 @@ router.post("/users/:id/password-reset", requireAuth, requireAdmin, async (req, 
   if (!isMailConfigured()) {
     res.status(503).json({
       error:
-        "Email is not configured. Set SMTP_USER, SMTP_PASS, and SMTP_FROM (SMTP_HOST/SMTP_PORT/SMTP_SECURE are optional and default to Gmail).",
+        "Email is not configured. Set SMTP settings in Admin > Configuration > Password Reset Email (SMTP).",
     });
     return;
   }
@@ -1478,6 +1526,17 @@ router.get("/antivirus/test", requireAuth, requireAdmin, async (_req, res) => {
 // GET /api/admin/antivirus/install-instructions — manual setup helper
 router.get("/antivirus/install-instructions", requireAuth, requireAdmin, (_req, res) => {
   res.json(getAntivirusInstallInstructions());
+});
+
+// POST /api/admin/restart - request service restart
+router.post("/restart", requireAuth, requireAdmin, (_req, res) => {
+  res.json({
+    ok: true,
+    message: "Server restart requested. The connection may close briefly.",
+  });
+  setTimeout(() => {
+    process.exit(1);
+  }, 750);
 });
 
 export default router;
