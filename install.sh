@@ -20,6 +20,8 @@ HEALTH_TIMEOUT_SECONDS=45
 LIVEKIT_CONFIG="/etc/livekit.yaml"
 LIVEKIT_SERVICE="livekit-server"
 LIVEKIT_PORT=7880
+LIVEKIT_UDP_PORT_START=50000
+LIVEKIT_UDP_PORT_END=50100
 
 INSTALL_CLAMAV=true
 CLAMAV_DECISION_EXPLICIT=false
@@ -50,12 +52,14 @@ Usage:
   sudo bash install.sh [version] [options]
 
 Options:
+  --mode <native|docker>       Installation mode (default: prompt in interactive shell)
   --non-interactive            Run first-time setup without prompts (requires admin flags)
   --admin-email <email>        Admin email for first-time setup
   --admin-username <username>  Admin username for first-time setup
   --admin-password <password>  Admin password for first-time setup
   --server-name <name>         Server name for first-time setup
   --data-dir <path>            Override persistent data directory (default: /var/lib/chitchat)
+  --docker-port <port>         Host port for Docker mode (default: 3001)
   --with-clamav                Force install/configure ClamAV upload scanning
   --skip-clamav                Do not install/configure ClamAV upload scanning
   --help                       Show this help
@@ -68,12 +72,63 @@ random_string() {
   head -c 256 /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c "$len"
 }
 
+ensure_env_var() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  if grep -Eq "^${key}=" "$file"; then
+    sed -i -E "s|^${key}=.*|${key}=${value}|" "$file"
+  else
+    echo "${key}=${value}" >> "$file"
+  fi
+}
+
+ensure_docker_runtime() {
+  if command -v docker >/dev/null 2>&1; then
+    ok "Docker already installed ($(docker --version | head -1))"
+  else
+    info "Installing Docker..."
+    if command -v apt-get >/dev/null 2>&1; then
+      apt-get update -qq
+      apt-get install -y -qq docker.io docker-compose-plugin > /dev/null
+    elif command -v dnf >/dev/null 2>&1; then
+      dnf install -y -q docker docker-compose-plugin > /dev/null || dnf install -y -q docker docker-compose > /dev/null
+    elif command -v yum >/dev/null 2>&1; then
+      yum install -y -q docker docker-compose-plugin > /dev/null || yum install -y -q docker docker-compose > /dev/null
+    else
+      fail "Unsupported package manager. Install Docker manually, then rerun with --mode docker."
+    fi
+    command -v docker >/dev/null 2>&1 || fail "Docker installation failed. Install Docker manually and rerun."
+    ok "Docker installed"
+  fi
+
+  if systemctl list-unit-files | grep -q '^docker\.service'; then
+    systemctl enable docker --quiet || true
+    systemctl start docker || true
+  fi
+
+  if ! docker info >/dev/null 2>&1; then
+    fail "Docker daemon is not available. Start Docker and rerun."
+  fi
+
+  if docker compose version >/dev/null 2>&1; then
+    COMPOSE_CMD=(docker compose)
+  elif command -v docker-compose >/dev/null 2>&1; then
+    COMPOSE_CMD=(docker-compose)
+  else
+    fail "Docker Compose not found. Install Docker Compose plugin and rerun."
+  fi
+}
+
 VERSION="latest"
+INSTALL_MODE="native"
+MODE_EXPLICIT=false
 NON_INTERACTIVE=false
 SETUP_ADMIN_EMAIL=""
 SETUP_ADMIN_USERNAME=""
 SETUP_ADMIN_PASSWORD=""
 SETUP_SERVER_NAME=""
+DOCKER_HOST_PORT=3001
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -84,6 +139,19 @@ while [ "$#" -gt 0 ]; do
     --non-interactive)
       NON_INTERACTIVE=true
       shift
+      ;;
+    --mode)
+      [ $# -ge 2 ] || fail "--mode requires a value (native|docker)"
+      case "$2" in
+        native|docker)
+          INSTALL_MODE="$2"
+          MODE_EXPLICIT=true
+          ;;
+        *)
+          fail "--mode must be 'native' or 'docker'"
+          ;;
+      esac
+      shift 2
       ;;
     --admin-email)
       [ $# -ge 2 ] || fail "--admin-email requires a value"
@@ -110,6 +178,13 @@ while [ "$#" -gt 0 ]; do
       DATA_DIR="$2"
       shift 2
       ;;
+    --docker-port)
+      [ $# -ge 2 ] || fail "--docker-port requires a value"
+      [[ "$2" =~ ^[0-9]+$ ]] || fail "--docker-port must be numeric"
+      [ "$2" -ge 1 ] && [ "$2" -le 65535 ] || fail "--docker-port must be between 1 and 65535"
+      DOCKER_HOST_PORT="$2"
+      shift 2
+      ;;
     --with-clamav)
       INSTALL_CLAMAV=true
       CLAMAV_DECISION_EXPLICIT=true
@@ -134,13 +209,57 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+if [ "${MODE_EXPLICIT}" != "true" ]; then
+  if [ "${NON_INTERACTIVE}" = "true" ]; then
+    INSTALL_MODE="native"
+  else
+    echo ""
+    echo -e "${BOLD}Install mode${RESET}"
+    echo "  1) Native Linux service (systemd)"
+    echo "  2) Docker Compose"
+    if [ -r /dev/tty ]; then
+      read -r -p "Choose install mode [1/2] (default: 1): " mode_choice </dev/tty || mode_choice=""
+    else
+      warn "No interactive terminal detected; defaulting to native mode."
+      mode_choice="1"
+    fi
+    case "${mode_choice:-1}" in
+      1)
+        INSTALL_MODE="native"
+        ;;
+      2)
+        INSTALL_MODE="docker"
+        ;;
+      *)
+        warn "Unrecognized choice, defaulting to native mode."
+        INSTALL_MODE="native"
+        ;;
+    esac
+  fi
+fi
+
+if [ "${INSTALL_MODE}" = "docker" ] && [ "${NON_INTERACTIVE}" != "true" ] && [ -r /dev/tty ]; then
+  read -r -p "Docker host port for ChitChat [${DOCKER_HOST_PORT}]: " docker_port_input </dev/tty || docker_port_input=""
+  if [ -n "${docker_port_input}" ]; then
+    if [[ "${docker_port_input}" =~ ^[0-9]+$ ]] && [ "${docker_port_input}" -ge 1 ] && [ "${docker_port_input}" -le 65535 ]; then
+      DOCKER_HOST_PORT="${docker_port_input}"
+    else
+      warn "Invalid port input, keeping default ${DOCKER_HOST_PORT}."
+    fi
+  fi
+fi
+
 if [ "${CLAMAV_DECISION_EXPLICIT}" != "true" ]; then
   if [ "${NON_INTERACTIVE}" = "true" ]; then
     INSTALL_CLAMAV=true
   else
     echo ""
     echo -e "${BOLD}Optional: Upload Malware Scanning (ClamAV)${RESET}"
-    echo "  This installs ClamAV so uploads can be scanned before storage."
+    if [ "${INSTALL_MODE}" = "docker" ]; then
+      echo "  This enables the optional ClamAV Docker service/profile."
+    else
+      echo "  This installs ClamAV so uploads can be scanned before storage."
+    fi
     echo "  If disabled, uploads still work normally but are not malware-scanned."
     if [ -r /dev/tty ]; then
       read -r -p "Install and enable ClamAV scanning? [Y/n]: " clamav_choice </dev/tty || clamav_choice=""
@@ -233,6 +352,175 @@ for cmd in curl git; do
     fi
   fi
 done
+
+if [ "${INSTALL_MODE}" = "docker" ]; then
+  info "Selected install mode: Docker Compose"
+  ensure_docker_runtime
+
+  if [ "$VERSION" = "latest" ]; then
+    info "Fetching latest release..."
+    VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' || echo "")
+    if [ -z "$VERSION" ]; then
+      VERSION="main"
+      info "No releases found, using main branch"
+    fi
+  fi
+  ok "Version: ${VERSION}"
+
+  git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
+  if [ -d "${APP_DIR}/.git" ]; then
+    info "Updating existing installation..."
+    cd "$APP_DIR"
+    git fetch --all --quiet
+    if [ "$VERSION" = "main" ]; then
+      git checkout main --quiet
+      git pull --quiet
+    else
+      git checkout "$VERSION" --quiet
+    fi
+    ok "Updated to ${VERSION}"
+  else
+    info "Downloading ChitChat..."
+    if [ -d "$APP_DIR" ]; then
+      rm -rf "$APP_DIR"
+    fi
+    if [ "$VERSION" = "main" ]; then
+      git clone --quiet --depth 1 "https://github.com/${REPO}.git" "$APP_DIR"
+    else
+      git clone --quiet --depth 1 --branch "$VERSION" "https://github.com/${REPO}.git" "$APP_DIR"
+    fi
+    ok "Downloaded successfully"
+  fi
+
+  cd "${APP_DIR}"
+  [ -f "${APP_DIR}/docker-compose.yml" ] || fail "docker-compose.yml not found in ${APP_DIR}"
+
+  if [ ! -f "${APP_DIR}/.env" ]; then
+    cp "${APP_DIR}/.env.example" "${APP_DIR}/.env"
+    ok "Created ${APP_DIR}/.env from .env.example"
+  else
+    ok "Using existing ${APP_DIR}/.env"
+  fi
+
+  # Detect the server's primary IP address (used for default LiveKit URL)
+  SERVER_IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -1)
+  if [ -z "$SERVER_IP" ]; then
+    SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
+  fi
+
+  DOCKER_LIVEKIT_DIR="${APP_DIR}/deploy/livekit"
+  DOCKER_LIVEKIT_CONFIG="${DOCKER_LIVEKIT_DIR}/livekit.yaml"
+  mkdir -p "${DOCKER_LIVEKIT_DIR}"
+
+  LK_API_KEY="$(grep -E '^LIVEKIT_API_KEY=' "${APP_DIR}/.env" | tail -1 | cut -d= -f2- || true)"
+  LK_API_SECRET="$(grep -E '^LIVEKIT_API_SECRET=' "${APP_DIR}/.env" | tail -1 | cut -d= -f2- || true)"
+  if [ -z "${LK_API_KEY}" ] || [ -z "${LK_API_SECRET}" ]; then
+    LK_API_KEY="API$(random_string 12)"
+    LK_API_SECRET="$(random_string 36)"
+  fi
+  cat > "${DOCKER_LIVEKIT_CONFIG}" << EOF
+port: ${LIVEKIT_PORT}
+rtc:
+  port_range_start: ${LIVEKIT_UDP_PORT_START}
+  port_range_end: ${LIVEKIT_UDP_PORT_END}
+  use_external_ip: true
+keys:
+  ${LK_API_KEY}: ${LK_API_SECRET}
+logging:
+  level: info
+EOF
+  ok "LiveKit config written to ${DOCKER_LIVEKIT_CONFIG}"
+
+  ensure_env_var "${APP_DIR}/.env" "PORT" "3001"
+  ensure_env_var "${APP_DIR}/.env" "HOST_PORT" "${DOCKER_HOST_PORT}"
+  ensure_env_var "${APP_DIR}/.env" "DB_PATH" "/app/data/chitchat.db"
+  ensure_env_var "${APP_DIR}/.env" "DATA_DIR" "/app/data"
+  ensure_env_var "${APP_DIR}/.env" "LIVEKIT_PORT" "${LIVEKIT_PORT}"
+  ensure_env_var "${APP_DIR}/.env" "LIVEKIT_UDP_PORT_START" "${LIVEKIT_UDP_PORT_START}"
+  ensure_env_var "${APP_DIR}/.env" "LIVEKIT_UDP_PORT_END" "${LIVEKIT_UDP_PORT_END}"
+  ensure_env_var "${APP_DIR}/.env" "LIVEKIT_URL" "ws://${SERVER_IP}:${LIVEKIT_PORT}"
+  ensure_env_var "${APP_DIR}/.env" "LIVEKIT_API_KEY" "${LK_API_KEY}"
+  ensure_env_var "${APP_DIR}/.env" "LIVEKIT_API_SECRET" "${LK_API_SECRET}"
+  ensure_env_var "${APP_DIR}/.env" "FILES_AV_PROVIDER" "clamav"
+  ensure_env_var "${APP_DIR}/.env" "FILES_AV_CLAMAV_HOST" "clamav"
+  ensure_env_var "${APP_DIR}/.env" "FILES_AV_CLAMAV_PORT" "${CLAMAV_PORT}"
+  ensure_env_var "${APP_DIR}/.env" "FILES_AV_TIMEOUT_MS" "${CLAMAV_TIMEOUT_MS}"
+  ensure_env_var "${APP_DIR}/.env" "FILES_AV_FAIL_CLOSED" "${CLAMAV_FAIL_CLOSED}"
+  if [ "${INSTALL_CLAMAV}" = "true" ]; then
+    ensure_env_var "${APP_DIR}/.env" "FILES_AV_ENABLED" "true"
+  else
+    ensure_env_var "${APP_DIR}/.env" "FILES_AV_ENABLED" "false"
+  fi
+
+  info "Building Docker image..."
+  "${COMPOSE_CMD[@]}" build chitchat >/dev/null
+  ok "Docker image built"
+
+  info "Running database migration preflight..."
+  "${COMPOSE_CMD[@]}" run --rm --no-deps chitchat node dist/index.js --migrate-only >/dev/null
+  ok "Database migration preflight complete"
+
+  if "${COMPOSE_CMD[@]}" run --rm --no-deps chitchat test -f /app/data/config.json >/dev/null 2>&1; then
+    ok "Existing config found, skipping setup"
+  else
+    if [ "$NON_INTERACTIVE" = "true" ]; then
+      [ -n "$SETUP_ADMIN_EMAIL" ] || fail "Missing --admin-email for --non-interactive first install"
+      [ -n "$SETUP_ADMIN_USERNAME" ] || fail "Missing --admin-username for --non-interactive first install"
+      [ -n "$SETUP_ADMIN_PASSWORD" ] || fail "Missing --admin-password for --non-interactive first install"
+
+      info "Running first-time setup (non-interactive)..."
+      setup_args=(
+        --setup
+        --admin-email "$SETUP_ADMIN_EMAIL"
+        --admin-username "$SETUP_ADMIN_USERNAME"
+        --admin-password "$SETUP_ADMIN_PASSWORD"
+      )
+      if [ -n "$SETUP_SERVER_NAME" ]; then
+        setup_args+=(--server-name "$SETUP_SERVER_NAME")
+      fi
+      "${COMPOSE_CMD[@]}" run --rm --no-deps chitchat node dist/index.js "${setup_args[@]}"
+    else
+      info "Running first-time setup..."
+      "${COMPOSE_CMD[@]}" run --rm --no-deps chitchat node dist/index.js --setup </dev/tty
+    fi
+  fi
+
+  info "Starting services..."
+  if [ "${INSTALL_CLAMAV}" = "true" ]; then
+    "${COMPOSE_CMD[@]}" --profile clamav up -d --build
+  else
+    "${COMPOSE_CMD[@]}" up -d --build
+  fi
+
+  for _ in $(seq 1 "$HEALTH_TIMEOUT_SECONDS"); do
+    if curl -fsS "http://127.0.0.1:${DOCKER_HOST_PORT}/api/health" >/dev/null 2>&1; then
+      ok "Server is running and passed health check"
+      break
+    fi
+    sleep 1
+  done
+
+  if ! curl -fsS "http://127.0.0.1:${DOCKER_HOST_PORT}/api/health" >/dev/null 2>&1; then
+    fail "Server did not pass health check at http://127.0.0.1:${DOCKER_HOST_PORT}/api/health"
+  fi
+
+  echo ""
+  echo -e "${GREEN}${BOLD}  Docker installation complete!${RESET}"
+  echo ""
+  echo -e "  ${BOLD}Your server is running at:${RESET}"
+  echo -e "  ${CYAN}http://127.0.0.1:${DOCKER_HOST_PORT}${RESET}"
+  echo -e "  ${BOLD}LiveKit (voice/video):${RESET}"
+  echo -e "  ${CYAN}ws://${SERVER_IP}:${LIVEKIT_PORT}${RESET}"
+  echo ""
+  echo -e "  ${DIM}Useful commands:${RESET}"
+  echo -e "  ${DIM}  Status:   cd ${APP_DIR} && ${COMPOSE_CMD[*]} ps${RESET}"
+  echo -e "  ${DIM}  Logs:     cd ${APP_DIR} && ${COMPOSE_CMD[*]} logs -f chitchat${RESET}"
+  echo -e "  ${DIM}  Restart:  cd ${APP_DIR} && ${COMPOSE_CMD[*]} restart chitchat${RESET}"
+  echo -e "  ${DIM}  Stop:     cd ${APP_DIR} && ${COMPOSE_CMD[*]} down${RESET}"
+  echo -e "  ${DIM}  Env:      ${APP_DIR}/.env${RESET}"
+  echo ""
+  exit 0
+fi
 
 # Build tools are required for native addons (better-sqlite3)
 if ! command -v g++ &> /dev/null || ! command -v make &> /dev/null; then

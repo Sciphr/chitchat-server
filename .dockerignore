@@ -1,0 +1,14 @@
+node_modules
+dist
+bin
+.git
+.github
+.env
+.env.*
+!.env.example
+*.db
+*.db-journal
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+coverage

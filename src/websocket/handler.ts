@@ -1837,10 +1837,6 @@ export function setupSocketHandlers(io: Server) {
       const hasMore = messages.length >= config.messageHistoryLimit;
       socket.emit("message:history", { messages: messagesWithMeta, hasMore });
 
-      // Send MOTD as a system message if configured (only for non-DM rooms)
-      if (config.motd && roomMeta.type !== "dm") {
-        socket.emit("message:system", { content: config.motd });
-      }
     });
 
     // Load older messages before a given timestamp
