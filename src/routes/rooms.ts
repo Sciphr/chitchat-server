@@ -19,10 +19,23 @@ router.get("/", requireAuth, (_req, res) => {
 // POST /api/rooms
 router.post("/", requireAuth, (req, res) => {
   const config = getConfig();
-  const { isAdmin } = (req as any).user;
+  const { isAdmin, userId } = (req as any).user as {
+    isAdmin: boolean;
+    userId: string;
+  };
+  const db = getDb();
+  const rolePerms = db
+    .prepare(
+      `SELECT MAX(r.can_manage_channels) AS can_manage_channels
+       FROM user_roles ur
+       JOIN roles r ON r.id = ur.role_id
+       WHERE ur.user_id = ?`
+    )
+    .get(userId) as { can_manage_channels: number | null } | undefined;
+  const canManageChannels = isAdmin || (rolePerms?.can_manage_channels ?? 0) === 1;
 
-  if (!config.rooms.userCanCreate && !isAdmin) {
-    res.status(403).json({ error: "Only admins can create rooms on this server" });
+  if (!config.rooms.userCanCreate && !canManageChannels) {
+    res.status(403).json({ error: "You do not have permission to create rooms on this server" });
     return;
   }
 
@@ -59,7 +72,6 @@ router.post("/", requireAuth, (req, res) => {
     return;
   }
 
-  const db = getDb();
   const id = crypto.randomUUID();
   const created_by = (req as any).user.username;
 

@@ -5,6 +5,7 @@ import express, { Router } from "express";
 import { getConfig } from "../config.js";
 import { getDb } from "../db/database.js";
 import { requireAuth } from "../middleware/auth.js";
+import { getUserModerationState, getUserPermissions } from "../permissions.js";
 
 const router = Router();
 
@@ -107,10 +108,20 @@ router.post(
   requireAuth,
   parseUploadBody,
   (req, res) => {
-    const user = (req as any).user as { userId: string };
+    const user = (req as any).user as { userId: string; isAdmin: boolean };
     const db = getDb();
     const config = getConfig();
     const body = req.body as Buffer;
+    const perms = getUserPermissions(db, user.userId, Boolean(user.isAdmin));
+    if (!perms.canUploadFiles) {
+      res.status(403).json({ error: "Missing permission to upload files" });
+      return;
+    }
+    const moderation = getUserModerationState(db, user.userId);
+    if (moderation.isTimedOut) {
+      res.status(403).json({ error: "You are currently timed out" });
+      return;
+    }
 
     if (!Buffer.isBuffer(body) || body.length === 0) {
       res
@@ -185,8 +196,13 @@ router.post("/link", requireAuth, (req, res) => {
     messageId?: string;
     attachmentId?: string;
   };
-  const user = (req as any).user as { userId: string };
+  const user = (req as any).user as { userId: string; isAdmin: boolean };
   const db = getDb();
+  const perms = getUserPermissions(db, user.userId, Boolean(user.isAdmin));
+  if (!perms.canUploadFiles) {
+    res.status(403).json({ error: "Missing permission to upload files" });
+    return;
+  }
 
   if (!messageId || !attachmentId) {
     res.status(400).json({ error: "messageId and attachmentId are required" });

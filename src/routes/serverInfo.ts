@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { getConfig } from "../config.js";
+import crypto from "crypto";
 
 const router = Router();
 
@@ -9,9 +10,16 @@ router.get("/info", (_req, res) => {
   res.json({
     name: config.serverName,
     description: config.serverDescription,
+    iconUrl: config.serverIconUrl,
+    bannerUrl: config.serverBannerUrl,
+    public: config.serverPublic,
     registrationOpen: config.registration.open,
     inviteOnly: config.registration.inviteOnly,
     maintenanceMode: config.maintenanceMode,
+    serverAnnouncement: config.motd || "",
+    serverAnnouncementId: config.motd
+      ? crypto.createHash("sha1").update(config.motd).digest("hex")
+      : "",
     userCanCreateRooms: config.rooms.userCanCreate,
     livekitUrl: config.livekit.url || "",
     mediaLimits: {

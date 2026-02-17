@@ -7,10 +7,19 @@ CREATE TABLE IF NOT EXISTS users (
   avatar_url TEXT,
   about TEXT,
   push_to_talk_enabled INTEGER DEFAULT 0,
+  push_to_mute_enabled INTEGER DEFAULT 0,
   push_to_talk_key TEXT DEFAULT 'Space',
+  audio_input_sensitivity REAL DEFAULT 0.02,
+  noise_suppression_mode TEXT DEFAULT 'standard' CHECK (noise_suppression_mode IN ('off', 'standard', 'aggressive', 'rnnoise')),
   audio_input_id TEXT,
   video_input_id TEXT,
   audio_output_id TEXT,
+  video_background_mode TEXT DEFAULT 'off' CHECK (video_background_mode IN ('off', 'blur', 'image')),
+  video_background_image_url TEXT,
+  two_factor_enabled INTEGER NOT NULL DEFAULT 0,
+  two_factor_secret TEXT,
+  two_factor_pending_secret TEXT,
+  two_factor_pending_expires_at TEXT,
   activity_game TEXT,
   status TEXT DEFAULT 'offline' CHECK (status IN ('online', 'offline', 'away', 'dnd')),
   created_at TEXT DEFAULT (datetime('now')),
@@ -48,6 +57,7 @@ CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,
   room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  reply_to_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
   content TEXT NOT NULL,
   created_at TEXT DEFAULT (datetime('now'))
 );
@@ -93,14 +103,103 @@ CREATE TABLE IF NOT EXISTS user_room_notification_prefs (
   PRIMARY KEY (user_id, room_id)
 );
 
+CREATE TABLE IF NOT EXISTS invite_links (
+  id TEXT PRIMARY KEY,
+  code TEXT UNIQUE NOT NULL,
+  description TEXT,
+  created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  expires_at TEXT,
+  max_uses INTEGER NOT NULL DEFAULT 0,
+  uses INTEGER NOT NULL DEFAULT 0,
+  revoked INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS roles (
+  id TEXT PRIMARY KEY,
+  name TEXT UNIQUE NOT NULL,
+  color TEXT NOT NULL DEFAULT '#94a3b8',
+  position INTEGER NOT NULL DEFAULT 0,
+  can_manage_channels INTEGER NOT NULL DEFAULT 0,
+  can_manage_roles INTEGER NOT NULL DEFAULT 0,
+  can_manage_server INTEGER NOT NULL DEFAULT 0,
+  can_kick_members INTEGER NOT NULL DEFAULT 0,
+  can_ban_members INTEGER NOT NULL DEFAULT 0,
+  can_timeout_members INTEGER NOT NULL DEFAULT 0,
+  can_moderate_voice INTEGER NOT NULL DEFAULT 0,
+  can_pin_messages INTEGER NOT NULL DEFAULT 0,
+  can_manage_messages INTEGER NOT NULL DEFAULT 0,
+  can_upload_files INTEGER NOT NULL DEFAULT 1,
+  can_use_emojis INTEGER NOT NULL DEFAULT 1,
+  can_start_voice INTEGER NOT NULL DEFAULT 1,
+  is_system INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS user_permission_overrides (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  permission_key TEXT NOT NULL,
+  allow INTEGER NOT NULL DEFAULT 0,
+  updated_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  updated_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, permission_key)
+);
+
+CREATE TABLE IF NOT EXISTS user_moderation_states (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  muted_until TEXT,
+  deafened_until TEXT,
+  timed_out_until TEXT,
+  reason TEXT,
+  updated_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS server_bans (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  banned_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  reason TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS pinned_messages (
+  message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+  pinned_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  pinned_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS user_roles (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role_id TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+  assigned_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, role_id)
+);
+
+CREATE TABLE IF NOT EXISTS room_role_permissions (
+  room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  role_id TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+  allow_view INTEGER NOT NULL DEFAULT 1,
+  allow_send INTEGER NOT NULL DEFAULT 1,
+  allow_connect INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (room_id, role_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_room_id ON messages(room_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_reply_to_message_id ON messages(reply_to_message_id);
 CREATE INDEX IF NOT EXISTS idx_message_reactions_message_id ON message_reactions(message_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_uploaded_by ON attachments(uploaded_by);
 CREATE INDEX IF NOT EXISTS idx_friends_user_id ON friends(user_id);
 CREATE INDEX IF NOT EXISTS idx_friends_friend_id ON friends(friend_id);
 CREATE INDEX IF NOT EXISTS idx_user_room_notification_prefs_user_id ON user_room_notification_prefs(user_id);
 CREATE INDEX IF NOT EXISTS idx_room_categories_position ON room_categories(position);
+CREATE INDEX IF NOT EXISTS idx_invite_links_code ON invite_links(code);
+CREATE INDEX IF NOT EXISTS idx_user_roles_user_id ON user_roles(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_roles_role_id ON user_roles(role_id);
+CREATE INDEX IF NOT EXISTS idx_room_role_permissions_room_id ON room_role_permissions(room_id);
+CREATE INDEX IF NOT EXISTS idx_user_permission_overrides_user_id ON user_permission_overrides(user_id);
+CREATE INDEX IF NOT EXISTS idx_server_bans_created_at ON server_bans(created_at);
+CREATE INDEX IF NOT EXISTS idx_pinned_messages_pinned_at ON pinned_messages(pinned_at);
 `;
 
 /** Migrations for existing databases. Each runs once, tracked by _migrations table. */
@@ -290,6 +389,59 @@ export const MIGRATIONS: Array<{ name: string; sql: string }> = [
       DROP TABLE users;
       ALTER TABLE users_new RENAME TO users;
       PRAGMA foreign_keys=ON;
+    `,
+  },
+  {
+    name: "007_invite_links",
+    sql: `
+      CREATE TABLE IF NOT EXISTS invite_links (
+        id TEXT PRIMARY KEY,
+        code TEXT UNIQUE NOT NULL,
+        description TEXT,
+        created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        expires_at TEXT,
+        max_uses INTEGER NOT NULL DEFAULT 0,
+        uses INTEGER NOT NULL DEFAULT 0,
+        revoked INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_invite_links_code ON invite_links(code);
+    `,
+  },
+  {
+    name: "008_roles_permissions",
+    sql: `
+      CREATE TABLE IF NOT EXISTS roles (
+        id TEXT PRIMARY KEY,
+        name TEXT UNIQUE NOT NULL,
+        color TEXT NOT NULL DEFAULT '#94a3b8',
+        position INTEGER NOT NULL DEFAULT 0,
+        can_manage_channels INTEGER NOT NULL DEFAULT 0,
+        can_manage_roles INTEGER NOT NULL DEFAULT 0,
+        can_manage_server INTEGER NOT NULL DEFAULT 0,
+        is_system INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS user_roles (
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        role_id TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+        assigned_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (user_id, role_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS room_role_permissions (
+        room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        role_id TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+        allow_view INTEGER NOT NULL DEFAULT 1,
+        allow_send INTEGER NOT NULL DEFAULT 1,
+        allow_connect INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY (room_id, role_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_user_roles_user_id ON user_roles(user_id);
+      CREATE INDEX IF NOT EXISTS idx_user_roles_role_id ON user_roles(role_id);
+      CREATE INDEX IF NOT EXISTS idx_room_role_permissions_room_id ON room_role_permissions(room_id);
     `,
   },
 ];

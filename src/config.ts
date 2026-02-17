@@ -43,6 +43,9 @@ interface CorsConfig {
 export interface ServerConfig {
   serverName: string;
   serverDescription: string;
+  serverIconUrl: string;
+  serverBannerUrl: string;
+  serverPublic: boolean;
   motd: string;
   port: number;
   trustProxy: boolean;
@@ -71,6 +74,9 @@ export interface ServerConfig {
 const DEFAULT_CONFIG: ServerConfig = {
   serverName: "My ChitChat Server",
   serverDescription: "",
+  serverIconUrl: "",
+  serverBannerUrl: "",
+  serverPublic: false,
   motd: "",
   port: 3001,
   trustProxy: false,
@@ -162,6 +168,25 @@ function deepMerge(target: any, source: any): any {
   return result;
 }
 
+function normalizeOrigin(origin: string): string {
+  return origin.trim().replace(/\/+$/, "").toLowerCase();
+}
+
+function sanitizeCorsConfig(input: CorsConfig): CorsConfig {
+  const rawOrigins = Array.isArray(input.allowedOrigins) ? input.allowedOrigins : [];
+  const allowedOrigins = Array.from(
+    new Set(
+      rawOrigins
+        .map((origin) => (typeof origin === "string" ? normalizeOrigin(origin) : ""))
+        .filter(Boolean)
+    )
+  );
+  return {
+    allowedOrigins,
+    allowNoOrigin: input.allowNoOrigin !== false,
+  };
+}
+
 export function loadConfig(): ServerConfig {
   const dataDir = getDataDir();
   const configPath = getConfigPath();
@@ -224,6 +249,7 @@ export function loadConfig(): ServerConfig {
     merged.cors.allowNoOrigin =
       process.env.CORS_ALLOW_NO_ORIGIN.toLowerCase() === "true";
   }
+  merged.cors = sanitizeCorsConfig(merged.cors);
   if (process.env.REGISTRATION_MIN_PASSWORD_LENGTH) {
     merged.registration.minPasswordLength = parseInt(
       process.env.REGISTRATION_MIN_PASSWORD_LENGTH,

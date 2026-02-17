@@ -5,7 +5,7 @@ import express from "express";
 import cors from "cors";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { loadConfig } from "./config.js";
+import { getConfig, loadConfig } from "./config.js";
 import { getDb, closeDb } from "./db/database.js";
 import { setupSocketHandlers } from "./websocket/handler.js";
 import { needsSetup, runSetup, parseSetupFlags } from "./cli/setup.js";
@@ -39,18 +39,40 @@ async function main() {
   const app = express();
   const httpServer = createServer(app);
   app.set("trust proxy", config.trustProxy);
-  const allowedOrigins = new Set(
-    config.cors.allowedOrigins.map((origin) =>
-      origin.replace(/\/+$/, "").toLowerCase()
-    )
-  );
+  const normalizeOrigin = (origin: string) =>
+    origin.replace(/\/+$/, "").toLowerCase();
+  const escapeRegex = (value: string) =>
+    value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   const isOriginAllowed = (origin?: string): boolean => {
+    const corsConfig = getConfig().cors;
+    const allowedOrigins = new Set(
+      corsConfig.allowedOrigins
+        .map((entry) => normalizeOrigin(entry))
+        .filter(Boolean)
+    );
+    const allowAnyOrigin = allowedOrigins.has("*");
+    const wildcardMatchers = Array.from(allowedOrigins)
+      .filter((entry) => entry !== "*" && entry.includes("*"))
+      .map((pattern) => {
+        const regex = new RegExp(
+          `^${pattern
+            .split("*")
+            .map((part) => escapeRegex(part))
+            .join(".*")}$`
+        );
+        return (candidate: string) => regex.test(candidate);
+      });
     if (!origin) {
-      return config.cors.allowNoOrigin;
+      return corsConfig.allowNoOrigin;
     }
-    const normalized = origin.replace(/\/+$/, "").toLowerCase();
-    return allowedOrigins.has(normalized);
+    const normalized = normalizeOrigin(origin);
+    if (allowAnyOrigin) return true;
+    if (allowedOrigins.has(normalized)) return true;
+    for (const match of wildcardMatchers) {
+      if (match(normalized)) return true;
+    }
+    return false;
   };
 
   const getOriginFromReferer = (referer?: string): string | undefined => {

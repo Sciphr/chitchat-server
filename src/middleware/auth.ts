@@ -7,6 +7,7 @@ export interface JwtPayload {
   username: string;
   email: string;
   isAdmin: boolean;
+  purpose?: "auth" | "two_factor_challenge";
 }
 
 export function generateToken(payload: JwtPayload): string {
@@ -14,6 +15,15 @@ export function generateToken(payload: JwtPayload): string {
   return jwt.sign(payload, config.jwtSecret, {
     expiresIn: `${config.jwtExpiryDays}d`,
   });
+}
+
+export function generateTwoFactorChallengeToken(payload: JwtPayload): string {
+  const config = getConfig();
+  return jwt.sign(
+    { ...payload, purpose: "two_factor_challenge" },
+    config.jwtSecret,
+    { expiresIn: "5m" }
+  );
 }
 
 export function verifyToken(token: string): JwtPayload {
