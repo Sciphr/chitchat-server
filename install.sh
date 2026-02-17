@@ -142,7 +142,12 @@ if [ "${CLAMAV_DECISION_EXPLICIT}" != "true" ]; then
     echo -e "${BOLD}Optional: Upload Malware Scanning (ClamAV)${RESET}"
     echo "  This installs ClamAV so uploads can be scanned before storage."
     echo "  If disabled, uploads still work normally but are not malware-scanned."
-    read -r -p "Install and enable ClamAV scanning? [Y/n]: " clamav_choice
+    if [ -r /dev/tty ]; then
+      read -r -p "Install and enable ClamAV scanning? [Y/n]: " clamav_choice </dev/tty || clamav_choice=""
+    else
+      warn "No interactive terminal detected; defaulting to skip ClamAV install."
+      clamav_choice="n"
+    fi
     case "${clamav_choice:-Y}" in
       y|Y|yes|YES|"")
         INSTALL_CLAMAV=true
@@ -248,36 +253,82 @@ fi
 # Optional: install ClamAV for upload malware scanning
 if [ "${INSTALL_CLAMAV}" = "true" ]; then
   info "Installing ClamAV (upload malware scanning)..."
+  CLAMAV_SOCKET=""
+  CLAMD_CONFIG=""
   if command -v apt-get &> /dev/null; then
     apt-get update -qq && apt-get install -y -qq clamav clamav-daemon > /dev/null
-    CLAMAV_SERVICE="clamav-daemon"
   elif command -v dnf &> /dev/null; then
     dnf install -y -q clamav clamav-update clamd > /dev/null
-    if systemctl list-unit-files | grep -q '^clamd@scan\.service'; then
-      CLAMAV_SERVICE="clamd@scan"
-    else
-      CLAMAV_SERVICE="clamd"
-    fi
   elif command -v yum &> /dev/null; then
     yum install -y -q clamav clamav-update clamd > /dev/null
-    if systemctl list-unit-files | grep -q '^clamd@scan\.service'; then
-      CLAMAV_SERVICE="clamd@scan"
-    else
-      CLAMAV_SERVICE="clamd"
-    fi
   else
     warn "Unsupported package manager for ClamAV auto-install. Skipping antivirus setup."
     INSTALL_CLAMAV=false
   fi
 
   if [ "${INSTALL_CLAMAV}" = "true" ]; then
-    if [ -n "${CLAMAV_SERVICE}" ] && systemctl list-unit-files | grep -q "^${CLAMAV_SERVICE}\\.service"; then
+    # Detect available service unit name across distros.
+    if systemctl list-unit-files | grep -q '^clamav-daemon\.service'; then
+      CLAMAV_SERVICE="clamav-daemon"
+    elif systemctl list-unit-files | grep -q '^clamd@scan\.service'; then
+      CLAMAV_SERVICE="clamd@scan"
+    elif systemctl list-unit-files | grep -q '^clamd\.service'; then
+      CLAMAV_SERVICE="clamd"
+    fi
+
+    # Some Debian installs primarily expose socket activation.
+    if [ -z "${CLAMAV_SERVICE}" ] && systemctl list-unit-files | grep -q '^clamav-daemon\.socket'; then
+      CLAMAV_SERVICE="clamav-daemon"
+      CLAMAV_SOCKET="clamav-daemon.socket"
+    fi
+
+    # Locate clamd config and ensure TCP endpoint is enabled for app integration.
+    for cfg in /etc/clamav/clamd.conf /etc/clamd.d/scan.conf /etc/clamd.conf; do
+      if [ -f "$cfg" ]; then
+        CLAMD_CONFIG="$cfg"
+        break
+      fi
+    done
+    if [ -n "${CLAMD_CONFIG}" ]; then
+      if grep -Eq '^\s*#?\s*TCPSocket\s+' "${CLAMD_CONFIG}"; then
+        sed -i -E "s|^\s*#?\s*TCPSocket\s+.*|TCPSocket ${CLAMAV_PORT}|" "${CLAMD_CONFIG}"
+      else
+        echo "TCPSocket ${CLAMAV_PORT}" >> "${CLAMD_CONFIG}"
+      fi
+      if grep -Eq '^\s*#?\s*TCPAddr\s+' "${CLAMD_CONFIG}"; then
+        sed -i -E "s|^\s*#?\s*TCPAddr\s+.*|TCPAddr ${CLAMAV_HOST}|" "${CLAMD_CONFIG}"
+      else
+        echo "TCPAddr ${CLAMAV_HOST}" >> "${CLAMD_CONFIG}"
+      fi
+      ok "Configured ClamAV daemon TCP endpoint at ${CLAMAV_HOST}:${CLAMAV_PORT}"
+    else
+      warn "Could not find clamd config file. Scanner may not listen on TCP ${CLAMAV_PORT}."
+    fi
+
+    if [ -n "${CLAMAV_SOCKET}" ]; then
+      systemctl enable "${CLAMAV_SOCKET}" --quiet || true
+      systemctl restart "${CLAMAV_SOCKET}" || true
+    fi
+
+    if [ -n "${CLAMAV_SERVICE}" ]; then
       systemctl enable "${CLAMAV_SERVICE}" --quiet || true
       systemctl restart "${CLAMAV_SERVICE}" || true
       sleep 2
       if systemctl is-active --quiet "${CLAMAV_SERVICE}"; then
-        CLAMAV_READY=true
-        ok "ClamAV service is active (${CLAMAV_SERVICE})"
+        if command -v ss >/dev/null 2>&1; then
+          for _ in $(seq 1 15); do
+            if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "(:|\\.)${CLAMAV_PORT}$"; then
+              CLAMAV_READY=true
+              break
+            fi
+            sleep 1
+          done
+        fi
+        if [ "${CLAMAV_READY}" = "true" ]; then
+          ok "ClamAV service is active (${CLAMAV_SERVICE}) and listening on ${CLAMAV_HOST}:${CLAMAV_PORT}"
+        else
+          warn "ClamAV service is active (${CLAMAV_SERVICE}) but TCP ${CLAMAV_PORT} is not listening yet. Upload scanning will remain disabled."
+        fi
       else
         warn "ClamAV service is not active (${CLAMAV_SERVICE}). Upload scanning will remain disabled."
       fi
