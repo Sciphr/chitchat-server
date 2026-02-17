@@ -16,6 +16,8 @@ import filesRoutes from "./routes/files.js";
 import serverInfoRoutes from "./routes/serverInfo.js";
 import adminRoutes from "./routes/admin.js";
 import { runRetentionCleanup } from "./services/retention.js";
+import { recordAuditLog } from "./services/auditLog.js";
+import { bindSocketServer, trackApiUsage } from "./services/resourceMonitor.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -142,6 +144,61 @@ async function main() {
   }
   app.use(express.json());
 
+  app.use("/api", (req, res, next) => {
+    const startedAt = Date.now();
+    const requestBytes = Number(req.headers["content-length"] || 0) || 0;
+    let responseBytes = 0;
+
+    const originalWrite = res.write.bind(res);
+    const originalEnd = res.end.bind(res);
+    const originalJson = res.json.bind(res);
+
+    res.json = ((body?: any) => {
+      if (body && typeof body === "object" && typeof body.error === "string") {
+        res.locals.errorMessage = body.error;
+      }
+      return originalJson(body);
+    }) as typeof res.json;
+
+    res.write = ((chunk: any, ...args: any[]) => {
+      if (chunk) {
+        responseBytes += Buffer.isBuffer(chunk)
+          ? chunk.length
+          : Buffer.byteLength(String(chunk));
+      }
+      return originalWrite(chunk, ...args);
+    }) as typeof res.write;
+
+    res.end = ((chunk?: any, ...args: any[]) => {
+      if (chunk) {
+        responseBytes += Buffer.isBuffer(chunk)
+          ? chunk.length
+          : Buffer.byteLength(String(chunk));
+      }
+      return originalEnd(chunk, ...args);
+    }) as typeof res.end;
+
+    res.on("finish", () => {
+      const durationMs = Date.now() - startedAt;
+      const path = req.originalUrl?.split("?")[0] || req.path || "/";
+      trackApiUsage({
+        method: req.method,
+        path,
+        statusCode: res.statusCode,
+        requestBytes,
+        responseBytes,
+      });
+      recordAuditLog({
+        req,
+        statusCode: res.statusCode,
+        durationMs,
+        responseBytes,
+      });
+    });
+
+    next();
+  });
+
   // Defense-in-depth: block state-changing requests from untrusted browser origins.
   app.use("/api", (req, res, next) => {
     if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
@@ -201,6 +258,7 @@ async function main() {
   });
 
   // Setup WebSocket handlers
+  bindSocketServer(io);
   setupSocketHandlers(io);
 
   // Message retention cleanup (server default + per-room overrides).

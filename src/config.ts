@@ -33,6 +33,17 @@ interface LiveKitConfig {
 interface FilesConfig {
   storagePath: string;
   maxUploadSizeMB: number;
+  stripImageExif: boolean;
+  antivirus: FilesAntivirusConfig;
+}
+
+interface FilesAntivirusConfig {
+  enabled: boolean;
+  provider: "clamav";
+  clamavHost: string;
+  clamavPort: number;
+  timeoutMs: number;
+  failClosed: boolean;
 }
 
 interface CorsConfig {
@@ -121,6 +132,15 @@ const DEFAULT_CONFIG: ServerConfig = {
   files: {
     storagePath: "./uploads",
     maxUploadSizeMB: 25,
+    stripImageExif: false,
+    antivirus: {
+      enabled: false,
+      provider: "clamav",
+      clamavHost: "127.0.0.1",
+      clamavPort: 3310,
+      timeoutMs: 15000,
+      failClosed: true,
+    },
   },
   cors: {
     allowedOrigins: [
@@ -249,6 +269,39 @@ export function loadConfig(): ServerConfig {
     merged.cors.allowNoOrigin =
       process.env.CORS_ALLOW_NO_ORIGIN.toLowerCase() === "true";
   }
+  if (process.env.FILES_AV_ENABLED) {
+    merged.files.antivirus.enabled =
+      process.env.FILES_AV_ENABLED.toLowerCase() === "true";
+  }
+  if (process.env.FILES_AV_PROVIDER) {
+    merged.files.antivirus.provider =
+      process.env.FILES_AV_PROVIDER.toLowerCase() === "clamav"
+        ? "clamav"
+        : "clamav";
+  }
+  if (process.env.FILES_AV_CLAMAV_HOST) {
+    merged.files.antivirus.clamavHost = process.env.FILES_AV_CLAMAV_HOST;
+  }
+  if (process.env.FILES_AV_CLAMAV_PORT) {
+    merged.files.antivirus.clamavPort = parseInt(
+      process.env.FILES_AV_CLAMAV_PORT,
+      10
+    );
+  }
+  if (process.env.FILES_AV_TIMEOUT_MS) {
+    merged.files.antivirus.timeoutMs = parseInt(
+      process.env.FILES_AV_TIMEOUT_MS,
+      10
+    );
+  }
+  if (process.env.FILES_AV_FAIL_CLOSED) {
+    merged.files.antivirus.failClosed =
+      process.env.FILES_AV_FAIL_CLOSED.toLowerCase() === "true";
+  }
+  if (process.env.FILES_STRIP_IMAGE_EXIF) {
+    merged.files.stripImageExif =
+      process.env.FILES_STRIP_IMAGE_EXIF.toLowerCase() === "true";
+  }
   merged.cors = sanitizeCorsConfig(merged.cors);
   if (process.env.REGISTRATION_MIN_PASSWORD_LENGTH) {
     merged.registration.minPasswordLength = parseInt(
@@ -296,6 +349,28 @@ export function loadConfig(): ServerConfig {
   if (!path.isAbsolute(merged.files.storagePath)) {
     merged.files.storagePath = path.resolve(dataDir, merged.files.storagePath);
   }
+  if (
+    !Number.isInteger(merged.files.antivirus.clamavPort) ||
+    merged.files.antivirus.clamavPort < 1 ||
+    merged.files.antivirus.clamavPort > 65535
+  ) {
+    merged.files.antivirus.clamavPort = 3310;
+  }
+  if (
+    !Number.isInteger(merged.files.antivirus.timeoutMs) ||
+    merged.files.antivirus.timeoutMs < 1000 ||
+    merged.files.antivirus.timeoutMs > 120000
+  ) {
+    merged.files.antivirus.timeoutMs = 15000;
+  }
+  if (
+    merged.files.antivirus.provider !== "clamav"
+  ) {
+    merged.files.antivirus.provider = "clamav";
+  }
+  if (!merged.files.antivirus.clamavHost?.trim()) {
+    merged.files.antivirus.clamavHost = "127.0.0.1";
+  }
 
   // Write config back (saves generated JWT secret, fills in any new fields)
   try {
@@ -333,6 +408,15 @@ export function getRedactedConfig(): ServerConfig {
     files: {
       storagePath: cfg.files.storagePath,
       maxUploadSizeMB: cfg.files.maxUploadSizeMB,
+      stripImageExif: cfg.files.stripImageExif === true,
+      antivirus: {
+        enabled: cfg.files.antivirus.enabled,
+        provider: cfg.files.antivirus.provider,
+        clamavHost: cfg.files.antivirus.clamavHost,
+        clamavPort: cfg.files.antivirus.clamavPort,
+        timeoutMs: cfg.files.antivirus.timeoutMs,
+        failClosed: cfg.files.antivirus.failClosed,
+      },
     },
   };
 }

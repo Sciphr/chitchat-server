@@ -155,6 +155,16 @@ function ensureUserVoicePreferenceColumns(database: Database.Database) {
       "ALTER TABLE users ADD COLUMN two_factor_pending_expires_at TEXT;"
     );
   }
+  if (!names.has("desktop_notifications_enabled")) {
+    database.exec(
+      "ALTER TABLE users ADD COLUMN desktop_notifications_enabled INTEGER NOT NULL DEFAULT 0;"
+    );
+  }
+  if (!names.has("desktop_notifications_mentions_only")) {
+    database.exec(
+      "ALTER TABLE users ADD COLUMN desktop_notifications_mentions_only INTEGER NOT NULL DEFAULT 1;"
+    );
+  }
 }
 
 function ensureRoomRetentionColumns(database: Database.Database) {
@@ -188,6 +198,51 @@ function ensurePasswordResetTable(database: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_password_resets_expires_at ON password_resets(expires_at);
     CREATE INDEX IF NOT EXISTS idx_password_resets_used_at ON password_resets(used_at);
   `);
+}
+
+function ensureAuditLogTable(database: Database.Database) {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      actor_user_id TEXT,
+      actor_username TEXT,
+      actor_is_admin INTEGER NOT NULL DEFAULT 0,
+      method TEXT NOT NULL,
+      path TEXT NOT NULL,
+      status_code INTEGER NOT NULL,
+      success INTEGER NOT NULL DEFAULT 0,
+      action TEXT NOT NULL,
+      ip TEXT,
+      user_agent TEXT,
+      query_json TEXT,
+      body_json TEXT,
+      error_message TEXT,
+      duration_ms INTEGER NOT NULL DEFAULT 0,
+      response_bytes INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_user_id ON audit_logs(actor_user_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_status_code ON audit_logs(status_code);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_path ON audit_logs(path);
+  `);
+}
+
+function ensureRemoteControlSettingsTable(database: Database.Database) {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS remote_control_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      session_timeout_seconds INTEGER NOT NULL DEFAULT 300,
+      require_moderator_permission INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
+  database
+    .prepare(
+      `INSERT OR IGNORE INTO remote_control_settings (id, session_timeout_seconds, require_moderator_permission)
+       VALUES (1, 300, 1)`
+    )
+    .run();
 }
 
 function runMigrations(database: Database.Database) {
@@ -230,6 +285,8 @@ export function getDb(): Database.Database {
   ensureRoomRetentionColumns(db);
   ensureUserVoicePreferenceColumns(db);
   ensurePasswordResetTable(db);
+  ensureAuditLogTable(db);
+  ensureRemoteControlSettingsTable(db);
   db.exec(getSeedSQL());
 
   return db;

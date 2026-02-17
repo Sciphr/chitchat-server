@@ -23,10 +23,61 @@ type NotificationMode = "all" | "mentions" | "mute";
 
 const connectedUsers = new Map<string, ConnectedUser>();
 const pendingOfflineTimers = new Map<string, NodeJS.Timeout>();
+const pendingRemoteControlRequests = new Map<
+  string,
+  {
+    requestId: string;
+    roomId: string;
+    requesterUserId: string;
+    targetUserId: string;
+    createdAt: number;
+    expiresAt: number;
+    timeoutHandle?: NodeJS.Timeout;
+  }
+>();
+const activeRemoteControlSessions = new Map<
+  string,
+  {
+    sessionId: string;
+    roomId: string;
+    controllerUserId: string;
+    hostUserId: string;
+    token: string;
+    createdAt: number;
+    expiresAt: number;
+    timeoutHandle?: NodeJS.Timeout;
+  }
+>();
 
 // Rate limiting: track message timestamps per user
 const rateLimitBuckets = new Map<string, number[]>();
 const OFFLINE_GRACE_MS = 8000;
+
+function getRemoteControlTimeoutMs(db: ReturnType<typeof getDb>): number {
+  const row = db
+    .prepare(
+      `SELECT session_timeout_seconds
+       FROM remote_control_settings
+       WHERE id = 1`
+    )
+    .get() as { session_timeout_seconds?: number } | undefined;
+  const seconds = Number(row?.session_timeout_seconds ?? 300);
+  const safeSeconds = Number.isFinite(seconds)
+    ? Math.min(3600, Math.max(30, Math.round(seconds)))
+    : 300;
+  return safeSeconds * 1000;
+}
+
+function requiresModeratorPermission(db: ReturnType<typeof getDb>): boolean {
+  const row = db
+    .prepare(
+      `SELECT require_moderator_permission
+       FROM remote_control_settings
+       WHERE id = 1`
+    )
+    .get() as { require_moderator_permission?: number } | undefined;
+  return (row?.require_moderator_permission ?? 1) === 1;
+}
 
 /** Broadcast the full user list to all connected clients */
 function broadcastPresence(io: Server) {
@@ -669,6 +720,82 @@ export function setupSocketHandlers(io: Server) {
       next(new Error("Invalid token"));
     }
   });
+
+  function emitToUser(userId: string, event: string, payload: Record<string, unknown>) {
+    for (const [sid, cu] of connectedUsers.entries()) {
+      if (cu.userId === userId) {
+        io.to(sid).emit(event, payload);
+      }
+    }
+  }
+
+  function recordRemoteControlAudit(
+    db: ReturnType<typeof getDb>,
+    actor: { userId: string; username: string; isAdmin: boolean },
+    action: string,
+    roomId: string,
+    details: Record<string, unknown>
+  ) {
+    db.prepare(
+      `INSERT INTO audit_logs (
+        actor_user_id,
+        actor_username,
+        actor_is_admin,
+        method,
+        path,
+        status_code,
+        success,
+        action,
+        ip,
+        user_agent,
+        query_json,
+        body_json,
+        error_message,
+        duration_ms,
+        response_bytes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      actor.userId,
+      actor.username,
+      actor.isAdmin ? 1 : 0,
+      "WS",
+      `/ws/remote-control/${action}`,
+      200,
+      1,
+      `WS remote-control ${action}`,
+      null,
+      null,
+      "{}",
+      JSON.stringify({ roomId, ...details }),
+      null,
+      0,
+      0
+    );
+  }
+
+  function clearRemoteControlSession(
+    db: ReturnType<typeof getDb>,
+    sessionId: string,
+    endedByUserId: string | null,
+    reason: "revoked" | "expired" | "disconnect" | "host-left"
+  ) {
+    const session = activeRemoteControlSessions.get(sessionId);
+    if (!session) return;
+    if (session.timeoutHandle) {
+      clearTimeout(session.timeoutHandle);
+    }
+    activeRemoteControlSessions.delete(sessionId);
+    const payload = {
+      sessionId: session.sessionId,
+      roomId: session.roomId,
+      controllerUserId: session.controllerUserId,
+      hostUserId: session.hostUserId,
+      endedByUserId,
+      reason,
+    };
+    emitToUser(session.controllerUserId, "remote-control:session-ended", payload);
+    emitToUser(session.hostUserId, "remote-control:session-ended", payload);
+  }
 
   io.on("connection", (socket: Socket) => {
     const jwtUser = (socket as any).user as {
@@ -2546,6 +2673,312 @@ export function setupSocketHandlers(io: Server) {
     );
 
     socket.on(
+      "remote-control:request",
+      (
+        { roomId, targetUserId }: { roomId: string; targetUserId: string },
+        ack?: (payload: { ok: boolean; error?: string; requestId?: string; expiresAt?: string }) => void
+      ) => {
+        if (!roomId || !targetUserId || targetUserId === jwtUser.userId) {
+          if (ack) ack({ ok: false, error: "Invalid remote-control request" });
+          return;
+        }
+        const callRoom = getCallRoomById(db, roomId);
+        if (!callRoom) {
+          if (ack) ack({ ok: false, error: "Call room not found" });
+          return;
+        }
+        const inRoom = db
+          .prepare("SELECT 1 as ok FROM room_members WHERE room_id = ? AND user_id = ?")
+          .get(roomId, jwtUser.userId) as { ok: number } | undefined;
+        const targetInRoom = db
+          .prepare("SELECT 1 as ok FROM room_members WHERE room_id = ? AND user_id = ?")
+          .get(roomId, targetUserId) as { ok: number } | undefined;
+        if (!inRoom?.ok || !targetInRoom?.ok) {
+          if (ack) ack({ ok: false, error: "Both users must be in the same call" });
+          return;
+        }
+
+        if (requiresModeratorPermission(db) && !jwtUser.isAdmin) {
+          const perms = getUserPermissions(db, jwtUser.userId, false);
+          if (!perms.canModerateVoice) {
+            if (ack) ack({ ok: false, error: "Missing voice moderation permission" });
+            return;
+          }
+        }
+
+        const requestId = crypto.randomUUID();
+        const createdAt = Date.now();
+        const expiresAt = createdAt + 60_000;
+        const request = {
+          requestId,
+          roomId,
+          requesterUserId: jwtUser.userId,
+          targetUserId,
+          createdAt,
+          expiresAt,
+        };
+        const timeoutHandle = setTimeout(() => {
+          const current = pendingRemoteControlRequests.get(requestId);
+          if (!current) return;
+          pendingRemoteControlRequests.delete(requestId);
+          emitToUser(current.requesterUserId, "remote-control:request-denied", {
+            requestId,
+            roomId: current.roomId,
+            reason: "expired",
+          });
+          emitToUser(current.targetUserId, "remote-control:request-cancelled", {
+            requestId,
+            roomId: current.roomId,
+            requesterUserId: current.requesterUserId,
+          });
+        }, 60_000);
+        pendingRemoteControlRequests.set(requestId, {
+          ...request,
+          timeoutHandle,
+        });
+
+        emitToUser(targetUserId, "remote-control:request", {
+          requestId,
+          roomId,
+          requesterUserId: jwtUser.userId,
+          requesterUsername: jwtUser.username,
+          expiresAt: new Date(expiresAt).toISOString(),
+        });
+        recordRemoteControlAudit(db, jwtUser, "request", roomId, {
+          requestId,
+          targetUserId,
+        });
+        if (ack) {
+          ack({
+            ok: true,
+            requestId,
+            expiresAt: new Date(expiresAt).toISOString(),
+          });
+        }
+      }
+    );
+
+    socket.on(
+      "remote-control:respond",
+      (
+        { requestId, approve }: { requestId: string; approve: boolean },
+        ack?: (payload: { ok: boolean; error?: string; sessionId?: string; expiresAt?: string }) => void
+      ) => {
+        const request = pendingRemoteControlRequests.get(requestId);
+        if (!request) {
+          if (ack) ack({ ok: false, error: "Request not found or expired" });
+          return;
+        }
+        if (request.timeoutHandle) {
+          clearTimeout(request.timeoutHandle);
+        }
+        pendingRemoteControlRequests.delete(requestId);
+        if (request.targetUserId !== jwtUser.userId) {
+          if (ack) ack({ ok: false, error: "Not authorized for this request" });
+          return;
+        }
+        if (request.expiresAt <= Date.now()) {
+          emitToUser(request.requesterUserId, "remote-control:request-denied", {
+            requestId,
+            roomId: request.roomId,
+            reason: "expired",
+          });
+          if (ack) ack({ ok: false, error: "Request expired" });
+          return;
+        }
+
+        if (!approve) {
+          emitToUser(request.requesterUserId, "remote-control:request-denied", {
+            requestId,
+            roomId: request.roomId,
+            reason: "denied",
+          });
+          recordRemoteControlAudit(db, jwtUser, "deny", request.roomId, {
+            requestId,
+            requesterUserId: request.requesterUserId,
+          });
+          if (ack) ack({ ok: true });
+          return;
+        }
+
+        const timeoutMs = getRemoteControlTimeoutMs(db);
+        const sessionId = crypto.randomUUID();
+        const token = crypto.randomBytes(24).toString("base64url");
+        const createdAt = Date.now();
+        const expiresAt = createdAt + timeoutMs;
+        const session = {
+          sessionId,
+          roomId: request.roomId,
+          controllerUserId: request.requesterUserId,
+          hostUserId: request.targetUserId,
+          token,
+          createdAt,
+          expiresAt,
+        };
+        activeRemoteControlSessions.set(sessionId, session);
+        const timer = setTimeout(() => {
+          clearRemoteControlSession(db, sessionId, null, "expired");
+        }, timeoutMs);
+        activeRemoteControlSessions.set(sessionId, { ...session, timeoutHandle: timer });
+
+        const payload = {
+          sessionId,
+          roomId: request.roomId,
+          controllerUserId: request.requesterUserId,
+          hostUserId: request.targetUserId,
+          expiresAt: new Date(expiresAt).toISOString(),
+          token,
+        };
+        emitToUser(request.requesterUserId, "remote-control:session-started", payload);
+        emitToUser(request.targetUserId, "remote-control:session-started", payload);
+        recordRemoteControlAudit(db, jwtUser, "approve", request.roomId, {
+          requestId,
+          sessionId,
+          controllerUserId: request.requesterUserId,
+        });
+        if (ack) {
+          ack({
+            ok: true,
+            sessionId,
+            expiresAt: new Date(expiresAt).toISOString(),
+          });
+        }
+      }
+    );
+
+    socket.on(
+      "remote-control:revoke",
+      (
+        { sessionId }: { sessionId: string },
+        ack?: (payload: { ok: boolean; error?: string }) => void
+      ) => {
+        const session = activeRemoteControlSessions.get(sessionId);
+        if (!session) {
+          if (ack) ack({ ok: false, error: "Session not found" });
+          return;
+        }
+        if (
+          session.controllerUserId !== jwtUser.userId &&
+          session.hostUserId !== jwtUser.userId &&
+          !jwtUser.isAdmin
+        ) {
+          if (ack) ack({ ok: false, error: "Not authorized to revoke this session" });
+          return;
+        }
+        clearRemoteControlSession(db, sessionId, jwtUser.userId, "revoked");
+        recordRemoteControlAudit(db, jwtUser, "revoke", session.roomId, {
+          sessionId,
+        });
+        if (ack) ack({ ok: true });
+      }
+    );
+
+    socket.on(
+      "remote-control:list",
+      (
+        ack?: (payload: {
+          ok: boolean;
+          sessions?: Array<{
+            sessionId: string;
+            roomId: string;
+            controllerUserId: string;
+            hostUserId: string;
+            expiresAt: string;
+            token: string;
+          }>;
+          pendingRequests?: Array<{
+            requestId: string;
+            roomId: string;
+            requesterUserId: string;
+            targetUserId: string;
+            expiresAt: string;
+          }>;
+          error?: string;
+        }) => void
+      ) => {
+        try {
+          const sessions = Array.from(activeRemoteControlSessions.values())
+            .filter(
+              (session) =>
+                session.controllerUserId === jwtUser.userId ||
+                session.hostUserId === jwtUser.userId
+            )
+            .map((session) => ({
+              sessionId: session.sessionId,
+              roomId: session.roomId,
+              controllerUserId: session.controllerUserId,
+              hostUserId: session.hostUserId,
+              expiresAt: new Date(session.expiresAt).toISOString(),
+              token: session.token,
+            }));
+          const pendingRequests = Array.from(pendingRemoteControlRequests.values())
+            .filter(
+              (request) =>
+                request.requesterUserId === jwtUser.userId ||
+                request.targetUserId === jwtUser.userId
+            )
+            .map((request) => ({
+              requestId: request.requestId,
+              roomId: request.roomId,
+              requesterUserId: request.requesterUserId,
+              targetUserId: request.targetUserId,
+              expiresAt: new Date(request.expiresAt).toISOString(),
+            }));
+          if (ack) ack({ ok: true, sessions, pendingRequests });
+        } catch {
+          if (ack) ack({ ok: false, error: "Failed to load remote-control state" });
+        }
+      }
+    );
+
+    socket.on(
+      "remote-control:input",
+      (
+        {
+          sessionId,
+          token,
+          event,
+        }: {
+          sessionId: string;
+          token: string;
+          event: Record<string, unknown>;
+        },
+        ack?: (payload: { ok: boolean; error?: string }) => void
+      ) => {
+        const session = activeRemoteControlSessions.get(sessionId);
+        if (!session) {
+          if (ack) ack({ ok: false, error: "Session not found" });
+          return;
+        }
+        if (session.expiresAt <= Date.now()) {
+          clearRemoteControlSession(db, sessionId, null, "expired");
+          if (ack) ack({ ok: false, error: "Session expired" });
+          return;
+        }
+        if (session.controllerUserId !== jwtUser.userId) {
+          if (ack) ack({ ok: false, error: "Only controller can send input" });
+          return;
+        }
+        if (!token || token !== session.token) {
+          if (ack) ack({ ok: false, error: "Invalid session token" });
+          return;
+        }
+        if (!event || typeof event !== "object") {
+          if (ack) ack({ ok: false, error: "Invalid input event payload" });
+          return;
+        }
+
+        emitToUser(session.hostUserId, "remote-control:input", {
+          sessionId: session.sessionId,
+          token: session.token,
+          event,
+          fromUserId: session.controllerUserId,
+        });
+        if (ack) ack({ ok: true });
+      }
+    );
+
+    socket.on(
       "notifications:get",
       (
         ack?: (payload: {
@@ -2625,6 +3058,32 @@ export function setupSocketHandlers(io: Server) {
     socket.on("disconnect", () => {
       const user = connectedUsers.get(socket.id);
       if (user) {
+        for (const request of Array.from(pendingRemoteControlRequests.values())) {
+          if (request.requesterUserId === user.userId || request.targetUserId === user.userId) {
+            if (request.timeoutHandle) {
+              clearTimeout(request.timeoutHandle);
+            }
+            pendingRemoteControlRequests.delete(request.requestId);
+            if (request.targetUserId === user.userId) {
+              emitToUser(request.requesterUserId, "remote-control:request-denied", {
+                requestId: request.requestId,
+                roomId: request.roomId,
+                reason: "disconnect",
+              });
+            } else {
+              emitToUser(request.targetUserId, "remote-control:request-cancelled", {
+                requestId: request.requestId,
+                roomId: request.roomId,
+                requesterUserId: request.requesterUserId,
+              });
+            }
+          }
+        }
+        for (const session of Array.from(activeRemoteControlSessions.values())) {
+          if (session.controllerUserId === user.userId || session.hostUserId === user.userId) {
+            clearRemoteControlSession(db, session.sessionId, user.userId, "disconnect");
+          }
+        }
         const ownedCalls = db
           .prepare(
             "SELECT id FROM rooms WHERE type = 'voice' AND is_temporary = 1 AND owner_user_id = ?"

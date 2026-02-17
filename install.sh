@@ -21,6 +21,15 @@ LIVEKIT_CONFIG="/etc/livekit.yaml"
 LIVEKIT_SERVICE="livekit-server"
 LIVEKIT_PORT=7880
 
+INSTALL_CLAMAV=true
+CLAMAV_DECISION_EXPLICIT=false
+CLAMAV_HOST="127.0.0.1"
+CLAMAV_PORT=3310
+CLAMAV_FAIL_CLOSED=true
+CLAMAV_TIMEOUT_MS=15000
+CLAMAV_READY=false
+CLAMAV_SERVICE=""
+
 BOLD="\033[1m"
 DIM="\033[2m"
 GREEN="\033[32m"
@@ -47,6 +56,8 @@ Options:
   --admin-password <password>  Admin password for first-time setup
   --server-name <name>         Server name for first-time setup
   --data-dir <path>            Override persistent data directory (default: /var/lib/chitchat)
+  --with-clamav                Force install/configure ClamAV upload scanning
+  --skip-clamav                Do not install/configure ClamAV upload scanning
   --help                       Show this help
 USAGE
 }
@@ -99,6 +110,16 @@ while [ "$#" -gt 0 ]; do
       DATA_DIR="$2"
       shift 2
       ;;
+    --with-clamav)
+      INSTALL_CLAMAV=true
+      CLAMAV_DECISION_EXPLICIT=true
+      shift
+      ;;
+    --skip-clamav)
+      INSTALL_CLAMAV=false
+      CLAMAV_DECISION_EXPLICIT=true
+      shift
+      ;;
     -*)
       fail "Unknown option: $1"
       ;;
@@ -112,6 +133,30 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+
+if [ "${CLAMAV_DECISION_EXPLICIT}" != "true" ]; then
+  if [ "${NON_INTERACTIVE}" = "true" ]; then
+    INSTALL_CLAMAV=true
+  else
+    echo ""
+    echo -e "${BOLD}Optional: Upload Malware Scanning (ClamAV)${RESET}"
+    echo "  This installs ClamAV so uploads can be scanned before storage."
+    echo "  If disabled, uploads still work normally but are not malware-scanned."
+    read -r -p "Install and enable ClamAV scanning? [Y/n]: " clamav_choice
+    case "${clamav_choice:-Y}" in
+      y|Y|yes|YES|"")
+        INSTALL_CLAMAV=true
+        ;;
+      n|N|no|NO)
+        INSTALL_CLAMAV=false
+        ;;
+      *)
+        warn "Unrecognized choice, defaulting to Yes."
+        INSTALL_CLAMAV=true
+        ;;
+    esac
+  fi
+fi
 
 ROLLBACK_READY=false
 PREV_REF=""
@@ -199,6 +244,49 @@ if ! command -v g++ &> /dev/null || ! command -v make &> /dev/null; then
   ok "Build tools installed"
 else
   ok "Build tools available"
+fi
+# Optional: install ClamAV for upload malware scanning
+if [ "${INSTALL_CLAMAV}" = "true" ]; then
+  info "Installing ClamAV (upload malware scanning)..."
+  if command -v apt-get &> /dev/null; then
+    apt-get update -qq && apt-get install -y -qq clamav clamav-daemon > /dev/null
+    CLAMAV_SERVICE="clamav-daemon"
+  elif command -v dnf &> /dev/null; then
+    dnf install -y -q clamav clamav-update clamd > /dev/null
+    if systemctl list-unit-files | grep -q '^clamd@scan\.service'; then
+      CLAMAV_SERVICE="clamd@scan"
+    else
+      CLAMAV_SERVICE="clamd"
+    fi
+  elif command -v yum &> /dev/null; then
+    yum install -y -q clamav clamav-update clamd > /dev/null
+    if systemctl list-unit-files | grep -q '^clamd@scan\.service'; then
+      CLAMAV_SERVICE="clamd@scan"
+    else
+      CLAMAV_SERVICE="clamd"
+    fi
+  else
+    warn "Unsupported package manager for ClamAV auto-install. Skipping antivirus setup."
+    INSTALL_CLAMAV=false
+  fi
+
+  if [ "${INSTALL_CLAMAV}" = "true" ]; then
+    if [ -n "${CLAMAV_SERVICE}" ] && systemctl list-unit-files | grep -q "^${CLAMAV_SERVICE}\\.service"; then
+      systemctl enable "${CLAMAV_SERVICE}" --quiet || true
+      systemctl restart "${CLAMAV_SERVICE}" || true
+      sleep 2
+      if systemctl is-active --quiet "${CLAMAV_SERVICE}"; then
+        CLAMAV_READY=true
+        ok "ClamAV service is active (${CLAMAV_SERVICE})"
+      else
+        warn "ClamAV service is not active (${CLAMAV_SERVICE}). Upload scanning will remain disabled."
+      fi
+    else
+      warn "ClamAV service unit was not found. Upload scanning will remain disabled."
+    fi
+  fi
+else
+  warn "Skipping ClamAV installation (--skip-clamav). Upload scanning will remain disabled."
 fi
 
 # ─── Banner ───────────────────────────────────────────────────────────
@@ -513,7 +601,7 @@ fi
 
 # ─── Auto-configure LiveKit in ChitChat config ───────────────────────
 
-info "Configuring LiveKit connection..."
+info "Configuring LiveKit and upload scanning..."
 
 # Detect the server's primary IP address (the one used for default route)
 SERVER_IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -1)
@@ -534,10 +622,25 @@ node -e "
   if (!config.livekit.apiKey)    config.livekit.apiKey = '${LK_API_KEY}';
   if (!config.livekit.apiSecret) config.livekit.apiSecret = '${LK_API_SECRET}';
 
+  // Configure optional ClamAV upload scanning
+  if (!config.files) config.files = {};
+  if (!config.files.antivirus) config.files.antivirus = {};
+  config.files.antivirus.provider = 'clamav';
+  config.files.antivirus.clamavHost = '${CLAMAV_HOST}';
+  config.files.antivirus.clamavPort = ${CLAMAV_PORT};
+  config.files.antivirus.timeoutMs = ${CLAMAV_TIMEOUT_MS};
+  config.files.antivirus.failClosed = ${CLAMAV_FAIL_CLOSED};
+  config.files.antivirus.enabled = ${CLAMAV_READY};
+
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
 "
 
 ok "LiveKit configured (${LK_WS_URL})"
+if [ "${CLAMAV_READY}" = "true" ]; then
+  ok "Upload malware scanning enabled (ClamAV ${CLAMAV_HOST}:${CLAMAV_PORT})"
+else
+  warn "Upload malware scanning remains disabled (ClamAV not active)"
+fi
 
 # ─── Install systemd service ─────────────────────────────────────────
 

@@ -24,6 +24,13 @@ npm run start
 
 Default local URL: `http://127.0.0.1:3001`
 
+Installer notes:
+
+- The Linux installer now prompts whether to install ClamAV upload scanning.
+- You can force behavior with flags:
+  - `--with-clamav`
+  - `--skip-clamav`
+
 ## First Deploy Checklist
 
 1. Keep the app behind a reverse proxy (recommended for production).
@@ -76,6 +83,26 @@ For Gmail:
 1. Enable 2-Step Verification on the Google account.
 2. Create an App Password.
 3. Use that app password in `SMTP_PASS` (not your normal account password).
+
+## Malware Scanning For Uploads (Optional)
+
+ChitChat can scan uploads before they are written to disk using ClamAV (`clamd`).
+
+Environment variables:
+
+- `FILES_AV_ENABLED=true|false` (default: `false`)
+- `FILES_AV_PROVIDER=clamav` (current supported provider)
+- `FILES_AV_CLAMAV_HOST` (default: `127.0.0.1`)
+- `FILES_AV_CLAMAV_PORT` (default: `3310`)
+- `FILES_AV_TIMEOUT_MS` (default: `15000`)
+- `FILES_AV_FAIL_CLOSED=true|false` (default: `true`)
+
+Behavior:
+
+- If malware is detected, upload is rejected.
+- If scanner is unavailable:
+  - `FILES_AV_FAIL_CLOSED=true`: upload is rejected (safer).
+  - `FILES_AV_FAIL_CLOSED=false`: upload is allowed and warning is logged.
 
 ## Useful Endpoints
 

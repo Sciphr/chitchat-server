@@ -412,6 +412,12 @@
       margin-top: 4px;
     }
 
+    .backup-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }
+
     /* Actions bar */
     .actions-bar {
       display: flex;
@@ -440,6 +446,23 @@
     }
     .modal h3 { font-size: 18px; margin-bottom: 16px; }
     .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .muted {
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .th-sort {
+      cursor: pointer;
+      user-select: none;
+    }
 
     .hidden { display: none !important; }
     .error-msg { color: var(--danger); font-size: 13px; margin-top: 8px; }
@@ -507,6 +530,14 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         Roles & Access
       </div>
+      <div class="nav-item" data-page="audit">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        Audit Logs
+      </div>
+      <div class="nav-item" data-page="resources">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-6"/></svg>
+        Resources
+      </div>
     </nav>
     <div class="sidebar-footer">
       <span id="admin-username">admin</span>
@@ -518,6 +549,20 @@
     <!-- Dashboard Page -->
     <div id="page-dashboard" class="page">
       <h2>Dashboard</h2>
+      <div class="card">
+        <h3>Support</h3>
+        <p style="color:var(--text-secondary);margin-bottom:12px">
+          Found a bug or want to request a feature for the server?
+        </p>
+        <a
+          class="btn btn-primary btn-sm"
+          href="https://github.com/Sciphr/chitchat-server/issues"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Report an Issue
+        </a>
+      </div>
       <div class="stats-grid">
         <div class="stat-card">
           <div class="label">Total Users</div>
@@ -709,6 +754,115 @@
           <input type="number" id="cfg-files-maxUploadSizeMB" min="1" max="1024">
           <div class="field-hint">Maximum file size per upload (1–1024 MB)</div>
         </div>
+        <div class="inline-field">
+          <label>Strip image metadata from uploads <span class="tip" tabindex="0" data-tip="Removes metadata (EXIF/text/XMP where applicable) from JPEG, PNG, and WebP uploads before storing. This is privacy hardening, not malware scanning.">?</span></label>
+          <label class="toggle">
+            <input type="checkbox" id="cfg-files-stripImageExif">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="field-hint">Current implementation strips metadata from JPEG, PNG, and WebP uploads.</div>
+        <div class="inline-field">
+          <label>Malware Scan Uploads (ClamAV) <span class="tip" tabindex="0" data-tip="Scans uploads before they are stored. If enabled, files are checked through clamd over TCP.">?</span></label>
+          <label class="toggle">
+            <input type="checkbox" id="cfg-files-av-enabled">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div id="cfg-files-av-fields" class="hidden">
+          <div class="field">
+            <label for="cfg-files-av-provider">AV Provider</label>
+            <input type="text" id="cfg-files-av-provider" value="clamav" disabled>
+          </div>
+          <div class="field">
+            <label for="cfg-files-av-clamavHost">ClamAV Host</label>
+            <input type="text" id="cfg-files-av-clamavHost" placeholder="127.0.0.1">
+          </div>
+          <div class="field">
+            <label for="cfg-files-av-clamavPort">ClamAV Port</label>
+            <input type="number" id="cfg-files-av-clamavPort" min="1" max="65535">
+          </div>
+          <div class="field">
+            <label for="cfg-files-av-timeoutMs">Scan Timeout (ms)</label>
+            <input type="number" id="cfg-files-av-timeoutMs" min="1000" max="120000">
+          </div>
+          <div class="inline-field">
+            <label>Fail Closed (reject uploads if scanner is down) <span class="tip" tabindex="0" data-tip="Recommended on production. If disabled, uploads continue when scanner is unavailable, and a warning is logged.">?</span></label>
+            <label class="toggle">
+              <input type="checkbox" id="cfg-files-av-failClosed">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+        <div class="actions-bar">
+          <button class="btn btn-primary btn-sm" id="files-av-test-btn">Test Scanner Connection</button>
+          <button class="btn btn-sm" style="background:var(--border);color:var(--text-primary)" id="files-av-install-help-btn">Install Instructions</button>
+        </div>
+        <div class="field-hint" id="files-av-status">Scanner status not checked yet.</div>
+      </div>
+
+      <div class="card">
+        <h3>Backups & Restore</h3>
+        <div class="field-hint" style="margin-bottom:12px">
+          Backups are encrypted client-side with your passphrase before download. Keep the passphrase safe; it cannot be recovered.
+        </div>
+        <div class="backup-grid">
+          <div>
+            <div class="section-heading">Export Encrypted Backup</div>
+            <div class="field">
+              <label for="backup-export-passphrase">Passphrase</label>
+              <input type="password" id="backup-export-passphrase" placeholder="At least 12 characters">
+            </div>
+            <div class="inline-field">
+              <label>Show passphrase</label>
+              <label class="toggle">
+                <input type="checkbox" id="backup-export-show-passphrase">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <button class="btn btn-primary btn-sm" id="backup-export-btn">Download Backup</button>
+          </div>
+          <div>
+            <div class="section-heading">Restore Encrypted Backup</div>
+            <div class="field">
+              <label for="backup-restore-file">Backup File (.ccbk)</label>
+              <input type="file" id="backup-restore-file" accept=".ccbk,application/octet-stream">
+            </div>
+            <div class="field">
+              <label for="backup-restore-passphrase">Passphrase</label>
+              <input type="password" id="backup-restore-passphrase" placeholder="Passphrase used during backup">
+            </div>
+            <div class="inline-field">
+              <label>Show passphrase</label>
+              <label class="toggle">
+                <input type="checkbox" id="backup-restore-show-passphrase">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <button class="btn btn-danger btn-sm" id="backup-restore-btn">Restore Backup</button>
+          </div>
+        </div>
+        <div class="field-hint" id="backup-status" style="margin-top:12px">No backup action run yet.</div>
+      </div>
+
+      <div class="card">
+        <h3>Remote Control</h3>
+        <div class="field">
+          <label for="rc-session-timeout">Session Timeout (seconds)</label>
+          <input type="number" id="rc-session-timeout" min="30" max="3600" value="300">
+          <div class="field-hint">Control session expires automatically after this timeout unless manually revoked.</div>
+        </div>
+        <div class="inline-field">
+          <label>Require voice moderation permission to request control</label>
+          <label class="toggle">
+            <input type="checkbox" id="rc-require-moderator" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="actions-bar">
+          <button class="btn btn-primary btn-sm" id="rc-save-btn">Save Remote Control Settings</button>
+        </div>
+        <div class="field-hint" id="rc-status">Settings not loaded yet.</div>
       </div>
 
       <div class="card">
@@ -900,6 +1054,111 @@
         </table>
       </div>
     </div>
+
+    <div id="page-audit" class="page hidden">
+      <h2>Audit Logs</h2>
+      <div class="card">
+        <div class="toolbar">
+          <div class="field">
+            <label for="audit-q">Search</label>
+            <input type="text" id="audit-q" placeholder="path, actor, error">
+          </div>
+          <div class="field">
+            <label for="audit-method">Method</label>
+            <select id="audit-method">
+              <option value="">All</option>
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+              <option value="PUT">PUT</option>
+              <option value="PATCH">PATCH</option>
+              <option value="DELETE">DELETE</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="audit-success">Result</label>
+            <select id="audit-success">
+              <option value="">All</option>
+              <option value="true">Success</option>
+              <option value="false">Errors</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="audit-actor">Actor</label>
+            <input type="text" id="audit-actor" placeholder="username / user id">
+          </div>
+          <div class="field">
+            <label for="audit-path">Path contains</label>
+            <input type="text" id="audit-path" placeholder="/api/admin">
+          </div>
+          <div class="field">
+            <label for="audit-page-size">Page Size</label>
+            <select id="audit-page-size">
+              <option value="25">25</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+            </select>
+          </div>
+        </div>
+        <div class="actions-bar">
+          <button class="btn btn-primary btn-sm" id="audit-apply-btn">Apply Filters</button>
+          <button class="btn btn-sm" style="background:var(--border);color:var(--text-primary)" id="audit-clear-btn">Clear</button>
+          <span class="muted" id="audit-summary">-</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th class="th-sort" data-sort="created_at">Time</th>
+              <th class="th-sort" data-sort="method">Method</th>
+              <th class="th-sort" data-sort="path">Path</th>
+              <th>Actor</th>
+              <th class="th-sort" data-sort="status_code">Status</th>
+              <th class="th-sort" data-sort="duration_ms">Duration</th>
+              <th class="th-sort" data-sort="response_bytes">Resp Bytes</th>
+            </tr>
+          </thead>
+          <tbody id="audit-table"></tbody>
+        </table>
+        <div class="actions-bar" style="margin-top:12px">
+          <button class="btn btn-sm" style="background:var(--border);color:var(--text-primary)" id="audit-prev-btn">Prev</button>
+          <button class="btn btn-sm" style="background:var(--border);color:var(--text-primary)" id="audit-next-btn">Next</button>
+          <span class="muted" id="audit-page-label">Page 1</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="page-resources" class="page hidden">
+      <h2>Resources</h2>
+      <div class="card">
+        <div class="actions-bar">
+          <button class="btn btn-primary btn-sm" id="resources-refresh-btn">Refresh Now</button>
+          <span class="muted" id="resources-updated-at">-</span>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="label">CPU Load (1m)</div><div class="value" id="res-cpu1">-</div></div>
+          <div class="stat-card"><div class="label">System RAM Used</div><div class="value" id="res-ram-used">-</div></div>
+          <div class="stat-card"><div class="label">Process RSS</div><div class="value" id="res-proc-rss">-</div></div>
+          <div class="stat-card"><div class="label">WS Connections</div><div class="value" id="res-ws-current">-</div></div>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="label">API Req/s (1m)</div><div class="value" id="res-api-rps">-</div></div>
+          <div class="stat-card"><div class="label">Ingress/s (1m)</div><div class="value" id="res-api-in">-</div></div>
+          <div class="stat-card"><div class="label">Egress/s (1m)</div><div class="value" id="res-api-out">-</div></div>
+          <div class="stat-card"><div class="label">Online Users</div><div class="value" id="res-online-users">-</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Top API Routes</h3>
+        <table>
+          <thead><tr><th>Route</th><th>Hits</th></tr></thead>
+          <tbody id="resources-top-routes"></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h3>Notes</h3>
+        <div id="resources-notes" class="muted"></div>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -992,6 +1251,14 @@
   let editingUserRolesUserId = null;
   let editingRoomPermissionsRoomId = null;
   let editingRoomRetentionRoomId = null;
+  let auditState = {
+    page: 1,
+    pageSize: 50,
+    sortBy: 'created_at',
+    sortDir: 'DESC',
+    totalPages: 1,
+  };
+  let resourcesPollTimer = null;
 
   // Helpers
   const $ = (sel) => document.querySelector(sel);
@@ -1026,6 +1293,20 @@
     if (!iso) return '-';
     const d = new Date(iso + 'Z');
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  function formatDateTime(iso) {
+    if (!iso) return '-';
+    const d = new Date(iso);
+    return d.toLocaleString();
+  }
+
+  function formatBytes(bytes) {
+    const n = Number(bytes || 0);
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   }
 
   function formatRoomRetention(room) {
@@ -1067,6 +1348,10 @@
   }
 
   function logout() {
+    if (resourcesPollTimer) {
+      clearInterval(resourcesPollTimer);
+      resourcesPollTimer = null;
+    }
     token = null;
     currentUser = null;
     localStorage.removeItem('chitchat_admin_token');
@@ -1095,16 +1380,29 @@
 
   // Navigation
   function navigate(page) {
+    if (resourcesPollTimer) {
+      clearInterval(resourcesPollTimer);
+      resourcesPollTimer = null;
+    }
+
     $$('.page').forEach(p => p.classList.add('hidden'));
     $(`#page-${page}`).classList.remove('hidden');
     $$('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.page === page));
 
     if (page === 'dashboard') loadDashboard();
-    else if (page === 'config') loadConfig();
+    else if (page === 'config') {
+      loadConfig();
+      loadRemoteControlSettings();
+    }
     else if (page === 'users') loadUsers();
     else if (page === 'rooms') loadRooms();
     else if (page === 'invites') loadInvites();
     else if (page === 'roles') loadRolesPage();
+    else if (page === 'audit') loadAuditLogs();
+    else if (page === 'resources') {
+      loadResources();
+      resourcesPollTimer = setInterval(loadResources, 10000);
+    }
   }
 
   // Dashboard
@@ -1188,6 +1486,17 @@
       if (currentConfig.files) {
         $('#cfg-files-storagePath').value = currentConfig.files.storagePath || './uploads';
         $('#cfg-files-maxUploadSizeMB').value = currentConfig.files.maxUploadSizeMB || 25;
+        $('#cfg-files-stripImageExif').checked = currentConfig.files.stripImageExif === true;
+        const av = currentConfig.files.antivirus || {};
+        $('#cfg-files-av-enabled').checked = av.enabled === true;
+        $('#cfg-files-av-provider').value = av.provider || 'clamav';
+        $('#cfg-files-av-clamavHost').value = av.clamavHost || '127.0.0.1';
+        $('#cfg-files-av-clamavPort').value = av.clamavPort || 3310;
+        $('#cfg-files-av-timeoutMs').value = av.timeoutMs || 15000;
+        $('#cfg-files-av-failClosed').checked = av.failClosed !== false;
+        updateFilesAvFieldsVisibility();
+        $('#files-av-status').textContent = 'Scanner status not checked yet.';
+        $('#files-av-status').style.color = 'var(--text-muted)';
       }
     } catch (err) {
       toast(err.message, 'error');
@@ -1243,6 +1552,15 @@
       files: {
         storagePath: $('#cfg-files-storagePath').value.trim(),
         maxUploadSizeMB: parseInt($('#cfg-files-maxUploadSizeMB').value, 10) || 25,
+        stripImageExif: $('#cfg-files-stripImageExif').checked,
+        antivirus: {
+          enabled: $('#cfg-files-av-enabled').checked,
+          provider: 'clamav',
+          clamavHost: $('#cfg-files-av-clamavHost').value.trim() || '127.0.0.1',
+          clamavPort: parseInt($('#cfg-files-av-clamavPort').value, 10) || 3310,
+          timeoutMs: parseInt($('#cfg-files-av-timeoutMs').value, 10) || 15000,
+          failClosed: $('#cfg-files-av-failClosed').checked,
+        },
       },
     };
 
@@ -1253,7 +1571,14 @@
       if (result.requiresRestart && result.requiresRestart.length > 0) {
         $('#restart-banner').classList.remove('hidden');
       }
-      toast('Configuration saved');
+      if (result.storageMigration) {
+        const moved = Number(result.storageMigration.movedFiles || 0);
+        const already = Number(result.storageMigration.alreadyPresent || 0);
+        const missing = Number(result.storageMigration.missingSource || 0);
+        toast(`Configuration saved. Storage migration: moved ${moved}, already present ${already}, missing ${missing}.`);
+      } else {
+        toast('Configuration saved');
+      }
     } catch (err) {
       toast(err.message, 'error');
     }
@@ -1261,6 +1586,206 @@
 
   function parseLines(text) {
     return text.split('\n').map(l => l.trim()).filter(Boolean);
+  }
+
+  function updateFilesAvFieldsVisibility() {
+    const enabled = $('#cfg-files-av-enabled').checked;
+    if (enabled) {
+      $('#cfg-files-av-fields').classList.remove('hidden');
+    } else {
+      $('#cfg-files-av-fields').classList.add('hidden');
+    }
+  }
+
+  async function testFilesAvConnection() {
+    try {
+      const result = await api('GET', '/api/admin/antivirus/test');
+      if (result.ok) {
+        $('#files-av-status').textContent = `Scanner reachable (${result.host}:${result.port}) — ${result.detail}`;
+        $('#files-av-status').style.color = 'var(--success)';
+      } else {
+        $('#files-av-status').textContent = `Scanner check failed (${result.host}:${result.port}) — ${result.detail}`;
+        $('#files-av-status').style.color = 'var(--danger)';
+      }
+    } catch (err) {
+      $('#files-av-status').textContent = `Scanner check failed: ${err.message}`;
+      $('#files-av-status').style.color = 'var(--danger)';
+    }
+  }
+
+  async function showFilesAvInstallHelp() {
+    try {
+      const help = await api('GET', '/api/admin/antivirus/install-instructions');
+      const msg = [
+        `Package manager: ${help.packageManager}`,
+        `Install: ${help.installCommand}`,
+        `Enable service: ${help.enableServiceCommand}`,
+        `Restart service: ${help.restartServiceCommand}`,
+        `Expected service: ${help.expectedService}`,
+        `${help.note}`,
+      ].join('\n\n');
+      window.alert(msg);
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+
+  async function loadRemoteControlSettings() {
+    try {
+      const data = await api('GET', '/api/admin/remote-control-settings');
+      $('#rc-session-timeout').value = Number(data.sessionTimeoutSeconds || 300);
+      $('#rc-require-moderator').checked = data.requireModeratorPermission !== false;
+      $('#rc-status').textContent = 'Loaded current remote control settings.';
+      $('#rc-status').style.color = 'var(--text-muted)';
+    } catch (err) {
+      $('#rc-status').textContent = `Failed to load remote control settings: ${err.message}`;
+      $('#rc-status').style.color = 'var(--danger)';
+    }
+  }
+
+  async function saveRemoteControlSettings() {
+    const sessionTimeoutSeconds = parseInt($('#rc-session-timeout').value, 10);
+    const requireModeratorPermission = $('#rc-require-moderator').checked;
+    if (!Number.isInteger(sessionTimeoutSeconds) || sessionTimeoutSeconds < 30 || sessionTimeoutSeconds > 3600) {
+      toast('Session timeout must be between 30 and 3600 seconds', 'error');
+      return;
+    }
+    try {
+      await api('PUT', '/api/admin/remote-control-settings', {
+        sessionTimeoutSeconds,
+        requireModeratorPermission,
+      });
+      $('#rc-status').textContent = 'Remote control settings saved.';
+      $('#rc-status').style.color = 'var(--success)';
+      toast('Remote control settings saved');
+    } catch (err) {
+      $('#rc-status').textContent = `Failed to save remote control settings: ${err.message}`;
+      $('#rc-status').style.color = 'var(--danger)';
+      toast(err.message, 'error');
+    }
+  }
+
+  function setBackupStatus(message, isError = false) {
+    const el = $('#backup-status');
+    el.textContent = message;
+    el.style.color = isError ? 'var(--danger)' : 'var(--text-muted)';
+  }
+
+  function parseContentDispositionFilename(headerValue) {
+    if (!headerValue) return '';
+    const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(headerValue);
+    if (utf8Match && utf8Match[1]) {
+      try {
+        return decodeURIComponent(utf8Match[1].trim());
+      } catch {
+        return utf8Match[1].trim();
+      }
+    }
+    const basicMatch = /filename="?([^";]+)"?/i.exec(headerValue);
+    return basicMatch && basicMatch[1] ? basicMatch[1].trim() : '';
+  }
+
+  function syncPassphraseVisibility(checkboxSelector, inputSelector) {
+    const input = $(inputSelector);
+    const checked = $(checkboxSelector).checked;
+    if (!input) return;
+    input.type = checked ? 'text' : 'password';
+  }
+
+  async function exportEncryptedBackup() {
+    const passphrase = $('#backup-export-passphrase').value || '';
+    if (passphrase.length < 12) {
+      toast('Backup passphrase must be at least 12 characters', 'error');
+      return;
+    }
+
+    const button = $('#backup-export-btn');
+    button.disabled = true;
+    setBackupStatus('Creating encrypted backup...');
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(`${getBaseUrl()}/api/admin/backup/export`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ passphrase }),
+      });
+      if (!res.ok) {
+        let message = `HTTP ${res.status}`;
+        try {
+          const data = await res.json();
+          message = data.error || message;
+        } catch {}
+        throw new Error(message);
+      }
+
+      const blob = await res.blob();
+      const fileName =
+        parseContentDispositionFilename(res.headers.get('content-disposition')) ||
+        `chitchat-backup-${new Date().toISOString().replace(/[:]/g, '-')}.ccbk`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+
+      setBackupStatus(`Backup downloaded: ${fileName}`);
+      toast('Encrypted backup downloaded');
+    } catch (err) {
+      setBackupStatus(`Backup export failed: ${err.message}`, true);
+      toast(err.message, 'error');
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function restoreEncryptedBackup() {
+    const fileInput = $('#backup-restore-file');
+    const passphrase = $('#backup-restore-passphrase').value || '';
+    const file = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+    if (!file) {
+      toast('Choose a backup file to restore', 'error');
+      return;
+    }
+    if (passphrase.length < 12) {
+      toast('Restore passphrase must be at least 12 characters', 'error');
+      return;
+    }
+    const confirmed = window.confirm(
+      'Restore will replace the current database state. Continue?'
+    );
+    if (!confirmed) return;
+
+    const button = $('#backup-restore-btn');
+    button.disabled = true;
+    setBackupStatus('Restoring encrypted backup...');
+    try {
+      const payload = await file.arrayBuffer();
+      const headers = {
+        'Content-Type': 'application/octet-stream',
+        'x-backup-passphrase': passphrase,
+      };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(`${getBaseUrl()}/api/admin/backup/restore`, {
+        method: 'POST',
+        headers,
+        body: payload,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+      setBackupStatus(`Restore complete. Pre-restore backup: ${data.backupPath || 'created'}`);
+      toast('Backup restored successfully');
+      await Promise.all([loadConfig(), loadDashboard()]);
+    } catch (err) {
+      setBackupStatus(`Backup restore failed: ${err.message}`, true);
+      toast(err.message, 'error');
+    } finally {
+      button.disabled = false;
+    }
   }
 
   async function loadRoleState() {
@@ -1549,6 +2074,92 @@
     }
   }
 
+  function getAuditSortIcon(column) {
+    if (auditState.sortBy !== column) return '';
+    return auditState.sortDir === 'ASC' ? ' ↑' : ' ↓';
+  }
+
+  function updateAuditSortHeaders() {
+    $$('.th-sort').forEach((th) => {
+      const base = (th.dataset.sort || '').replace('_', ' ');
+      const title = base === 'created_at'
+        ? 'Time'
+        : base === 'status_code'
+          ? 'Status'
+          : base === 'duration_ms'
+            ? 'Duration'
+            : base === 'response_bytes'
+              ? 'Resp Bytes'
+              : base.charAt(0).toUpperCase() + base.slice(1);
+      th.textContent = `${title}${getAuditSortIcon(th.dataset.sort || '')}`;
+    });
+  }
+
+  async function loadAuditLogs() {
+    try {
+      const params = new URLSearchParams();
+      params.set('page', String(auditState.page));
+      params.set('pageSize', String(auditState.pageSize));
+      params.set('sortBy', auditState.sortBy);
+      params.set('sortDir', auditState.sortDir);
+      if ($('#audit-q').value.trim()) params.set('q', $('#audit-q').value.trim());
+      if ($('#audit-method').value) params.set('method', $('#audit-method').value);
+      if ($('#audit-success').value) params.set('success', $('#audit-success').value);
+      if ($('#audit-actor').value.trim()) params.set('actor', $('#audit-actor').value.trim());
+      if ($('#audit-path').value.trim()) params.set('path', $('#audit-path').value.trim());
+
+      const data = await api('GET', `/api/admin/audit-logs?${params.toString()}`);
+      auditState.totalPages = data.totalPages || 1;
+      $('#audit-summary').textContent = `${data.total} rows`;
+      $('#audit-page-label').textContent = `Page ${data.page} / ${data.totalPages}`;
+      $('#audit-prev-btn').disabled = data.page <= 1;
+      $('#audit-next-btn').disabled = data.page >= data.totalPages;
+
+      $('#audit-table').innerHTML = (data.rows || []).map((row) => `
+        <tr>
+          <td>${esc(formatDateTime(row.created_at))}</td>
+          <td><strong>${esc(row.method)}</strong></td>
+          <td>${esc(row.path)}</td>
+          <td>${esc(row.actor_username || row.actor_user_id || 'system')}</td>
+          <td><span style="color:${row.success ? 'var(--success)' : 'var(--danger)'}">${row.status_code}</span></td>
+          <td>${row.duration_ms} ms</td>
+          <td>${esc(formatBytes(row.response_bytes))}</td>
+        </tr>
+      `).join('');
+
+      updateAuditSortHeaders();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+
+  async function loadResources() {
+    try {
+      const data = await api('GET', '/api/admin/resources');
+      $('#resources-updated-at').textContent = `Updated ${formatDateTime(data.generatedAt)}`;
+      $('#res-cpu1').textContent = Number(data.system.loadAvg1m || 0).toFixed(2);
+      $('#res-ram-used').textContent = formatBytes(data.system.usedMemBytes || 0);
+      $('#res-proc-rss').textContent = formatBytes(data.processMemory.rssBytes || 0);
+      $('#res-ws-current').textContent = String(data.connections.websocketCurrent || 0);
+
+      $('#res-api-rps').textContent = Number(data.api.requestsPerSecond1m || 0).toFixed(2);
+      $('#res-api-in').textContent = `${formatBytes(data.api.bytesInPerSecond1m || 0)}/s`;
+      $('#res-api-out').textContent = `${formatBytes(data.api.bytesOutPerSecond1m || 0)}/s`;
+      $('#res-online-users').textContent = `${data.connections.usersOnline || 0}/${data.connections.usersTotal || 0}`;
+
+      $('#resources-top-routes').innerHTML = (data.api.topRoutes || []).map((row) => `
+        <tr>
+          <td>${esc(row.route)}</td>
+          <td>${row.hits}</td>
+        </tr>
+      `).join('') || `<tr><td colspan="2" class="muted">No traffic yet.</td></tr>`;
+
+      $('#resources-notes').textContent = data.notes?.mediaPlane || '';
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+
   window._editRoomRetention = (roomId, roomName, mode, days) => {
     editingRoomRetentionRoomId = roomId;
     $('#room-retention-title').textContent = `Retention: #${roomName}`;
@@ -1727,9 +2338,66 @@
   $('#login-email').addEventListener('keydown', e => { if (e.key === 'Enter') $('#login-password').focus(); });
   $('#logout-btn').addEventListener('click', logout);
   $('#save-config-btn').addEventListener('click', saveConfig);
+  $('#cfg-files-av-enabled').addEventListener('change', updateFilesAvFieldsVisibility);
+  $('#files-av-test-btn').addEventListener('click', testFilesAvConnection);
+  $('#files-av-install-help-btn').addEventListener('click', showFilesAvInstallHelp);
+  $('#backup-export-show-passphrase').addEventListener('change', () => {
+    syncPassphraseVisibility('#backup-export-show-passphrase', '#backup-export-passphrase');
+  });
+  $('#backup-restore-show-passphrase').addEventListener('change', () => {
+    syncPassphraseVisibility('#backup-restore-show-passphrase', '#backup-restore-passphrase');
+  });
+  $('#backup-export-btn').addEventListener('click', exportEncryptedBackup);
+  $('#backup-restore-btn').addEventListener('click', restoreEncryptedBackup);
+  $('#rc-save-btn').addEventListener('click', saveRemoteControlSettings);
   $('#create-room-btn').addEventListener('click', createRoom);
   $('#create-invite-btn').addEventListener('click', createInvite);
   $('#create-role-btn').addEventListener('click', createRole);
+  $('#audit-apply-btn').addEventListener('click', () => {
+    auditState.page = 1;
+    auditState.pageSize = parseInt($('#audit-page-size').value, 10) || 50;
+    loadAuditLogs();
+  });
+  $('#audit-clear-btn').addEventListener('click', () => {
+    $('#audit-q').value = '';
+    $('#audit-method').value = '';
+    $('#audit-success').value = '';
+    $('#audit-actor').value = '';
+    $('#audit-path').value = '';
+    $('#audit-page-size').value = '50';
+    auditState.page = 1;
+    auditState.pageSize = 50;
+    auditState.sortBy = 'created_at';
+    auditState.sortDir = 'DESC';
+    loadAuditLogs();
+  });
+  $('#audit-prev-btn').addEventListener('click', () => {
+    if (auditState.page > 1) {
+      auditState.page -= 1;
+      loadAuditLogs();
+    }
+  });
+  $('#audit-next-btn').addEventListener('click', () => {
+    if (auditState.page < auditState.totalPages) {
+      auditState.page += 1;
+      loadAuditLogs();
+    }
+  });
+  $('#resources-refresh-btn').addEventListener('click', loadResources);
+  $$('#page-audit .th-sort').forEach((th) => {
+    th.addEventListener('click', () => {
+      const key = th.dataset.sort;
+      if (!key) return;
+      if (auditState.sortBy === key) {
+        auditState.sortDir = auditState.sortDir === 'ASC' ? 'DESC' : 'ASC';
+      } else {
+        auditState.sortBy = key;
+        auditState.sortDir = key === 'created_at' ? 'DESC' : 'ASC';
+      }
+      auditState.page = 1;
+      loadAuditLogs();
+    });
+  });
   $('#new-role-color').addEventListener('input', (event) => {
     const value = event.target.value || '#f59e0b';
     $('#new-role-preview').style.color = value;

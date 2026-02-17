@@ -1,7 +1,9 @@
-import { Router } from "express";
+import express, { Router } from "express";
 import type { Request } from "express";
 import crypto from "crypto";
+import path from "path";
 import {
+  getConfig,
   getRedactedConfig,
   updateConfig,
   type ServerConfig,
@@ -14,6 +16,16 @@ import {
   isMailConfigured,
   sendPasswordResetEmail,
 } from "../services/passwordReset.js";
+import { getResourceSnapshot } from "../services/resourceMonitor.js";
+import {
+  getAntivirusInstallInstructions,
+  testAntivirusConnection,
+} from "../services/antivirus.js";
+import {
+  createEncryptedDatabaseBackup,
+  migrateAttachmentStorageRoot,
+  restoreEncryptedDatabaseBackup,
+} from "../services/backup.js";
 
 const router = Router();
 
@@ -53,6 +65,8 @@ router.get("/config", requireAuth, requireAdmin, (_req, res) => {
 // PUT /api/admin/config — partial update
 router.put("/config", requireAuth, requireAdmin, (req, res) => {
   const partial = req.body as Partial<ServerConfig>;
+  const currentConfig = getConfig();
+  const currentStoragePath = path.resolve(currentConfig.files.storagePath);
 
   // Validate critical fields
   if (
@@ -256,6 +270,64 @@ router.put("/config", requireAuth, requireAdmin, (req, res) => {
       res.status(400).json({ error: "files.maxUploadSizeMB must be between 1 and 1024" });
       return;
     }
+    if (
+      partial.files.stripImageExif !== undefined &&
+      typeof partial.files.stripImageExif !== "boolean"
+    ) {
+      res.status(400).json({ error: "files.stripImageExif must be a boolean" });
+      return;
+    }
+    if (partial.files.antivirus) {
+      if (
+        partial.files.antivirus.enabled !== undefined &&
+        typeof partial.files.antivirus.enabled !== "boolean"
+      ) {
+        res.status(400).json({ error: "files.antivirus.enabled must be a boolean" });
+        return;
+      }
+      if (
+        partial.files.antivirus.provider !== undefined &&
+        partial.files.antivirus.provider !== "clamav"
+      ) {
+        res.status(400).json({ error: "files.antivirus.provider must be 'clamav'" });
+        return;
+      }
+      if (
+        partial.files.antivirus.clamavHost !== undefined &&
+        (typeof partial.files.antivirus.clamavHost !== "string" ||
+          !partial.files.antivirus.clamavHost.trim())
+      ) {
+        res.status(400).json({ error: "files.antivirus.clamavHost must be a non-empty string" });
+        return;
+      }
+      if (
+        partial.files.antivirus.clamavPort !== undefined &&
+        (typeof partial.files.antivirus.clamavPort !== "number" ||
+          !Number.isInteger(partial.files.antivirus.clamavPort) ||
+          partial.files.antivirus.clamavPort < 1 ||
+          partial.files.antivirus.clamavPort > 65535)
+      ) {
+        res.status(400).json({ error: "files.antivirus.clamavPort must be an integer between 1 and 65535" });
+        return;
+      }
+      if (
+        partial.files.antivirus.timeoutMs !== undefined &&
+        (typeof partial.files.antivirus.timeoutMs !== "number" ||
+          !Number.isInteger(partial.files.antivirus.timeoutMs) ||
+          partial.files.antivirus.timeoutMs < 1000 ||
+          partial.files.antivirus.timeoutMs > 120000)
+      ) {
+        res.status(400).json({ error: "files.antivirus.timeoutMs must be an integer between 1000 and 120000" });
+        return;
+      }
+      if (
+        partial.files.antivirus.failClosed !== undefined &&
+        typeof partial.files.antivirus.failClosed !== "boolean"
+      ) {
+        res.status(400).json({ error: "files.antivirus.failClosed must be a boolean" });
+        return;
+      }
+    }
   }
 
   // Validate LiveKit media limits
@@ -278,8 +350,35 @@ router.put("/config", requireAuth, requireAdmin, (req, res) => {
   }
 
   try {
+    let storageMigration:
+      | {
+          movedFiles: number;
+          alreadyPresent: number;
+          missingSource: number;
+          failed: Array<{ storagePath: string; error: string }>;
+        }
+      | null = null;
+
+    if (partial.files?.storagePath !== undefined) {
+      const nextStoragePath = path.resolve(String(partial.files.storagePath).trim());
+      if (nextStoragePath !== currentStoragePath) {
+        storageMigration = migrateAttachmentStorageRoot(
+          currentStoragePath,
+          nextStoragePath
+        );
+        if (storageMigration.failed.length > 0) {
+          res.status(500).json({
+            error: "Failed to migrate one or more attachments to the new storage path",
+            storageMigration,
+          });
+          return;
+        }
+        partial.files.storagePath = nextStoragePath;
+      }
+    }
+
     const { requiresRestart } = updateConfig(partial);
-    res.json({ config: getRedactedConfig(), requiresRestart });
+    res.json({ config: getRedactedConfig(), requiresRestart, storageMigration });
   } catch (err) {
     console.error("Failed to update config:", err);
     res.status(500).json({
@@ -314,6 +413,58 @@ router.get("/users", requireAuth, requireAdmin, (_req, res) => {
     )
     .all();
   res.json(users);
+});
+
+// GET /api/admin/remote-control-settings
+router.get("/remote-control-settings", requireAuth, requireAdmin, (_req, res) => {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `SELECT session_timeout_seconds, require_moderator_permission
+       FROM remote_control_settings
+       WHERE id = 1`
+    )
+    .get() as
+    | { session_timeout_seconds: number; require_moderator_permission: number }
+    | undefined;
+  res.json({
+    sessionTimeoutSeconds: Number(row?.session_timeout_seconds ?? 300),
+    requireModeratorPermission: (row?.require_moderator_permission ?? 1) === 1,
+  });
+});
+
+// PUT /api/admin/remote-control-settings
+router.put("/remote-control-settings", requireAuth, requireAdmin, (req, res) => {
+  const timeoutRaw = Number(req.body?.sessionTimeoutSeconds);
+  const requireModeratorPermission = req.body?.requireModeratorPermission;
+
+  if (
+    !Number.isInteger(timeoutRaw) ||
+    timeoutRaw < 30 ||
+    timeoutRaw > 3600
+  ) {
+    res.status(400).json({ error: "sessionTimeoutSeconds must be an integer between 30 and 3600" });
+    return;
+  }
+  if (typeof requireModeratorPermission !== "boolean") {
+    res.status(400).json({ error: "requireModeratorPermission must be a boolean" });
+    return;
+  }
+
+  const db = getDb();
+  db.prepare(
+    `INSERT INTO remote_control_settings (id, session_timeout_seconds, require_moderator_permission, updated_at)
+     VALUES (1, ?, ?, datetime('now'))
+     ON CONFLICT(id) DO UPDATE SET
+       session_timeout_seconds = excluded.session_timeout_seconds,
+       require_moderator_permission = excluded.require_moderator_permission,
+       updated_at = datetime('now')`
+  ).run(timeoutRaw, requireModeratorPermission ? 1 : 0);
+
+  res.json({
+    sessionTimeoutSeconds: timeoutRaw,
+    requireModeratorPermission,
+  });
 });
 
 // POST /api/admin/users/:id/password-reset - send a password reset email
@@ -360,6 +511,60 @@ router.post("/users/:id/password-reset", requireAuth, requireAdmin, async (req, 
     res.status(500).json({ error: "Failed to send password reset email" });
   }
 });
+
+// POST /api/admin/backup/export - generate and download encrypted backup
+router.post("/backup/export", requireAuth, requireAdmin, (req, res) => {
+  const passphrase =
+    typeof req.body?.passphrase === "string" ? req.body.passphrase : "";
+  if (passphrase.length < 12) {
+    res.status(400).json({ error: "passphrase must be at least 12 characters" });
+    return;
+  }
+
+  try {
+    const backup = createEncryptedDatabaseBackup(passphrase);
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${backup.fileName}"`
+    );
+    res.send(backup.payload);
+  } catch (err) {
+    console.error("Failed to create encrypted backup:", err);
+    res.status(500).json({ error: "Failed to create encrypted backup" });
+  }
+});
+
+// POST /api/admin/backup/restore - restore encrypted backup payload
+router.post(
+  "/backup/restore",
+  requireAuth,
+  requireAdmin,
+  express.raw({ type: "application/octet-stream", limit: "1024mb" }),
+  (req, res) => {
+    const passphrase = (req.header("x-backup-passphrase") || "").trim();
+    if (passphrase.length < 12) {
+      res
+        .status(400)
+        .json({ error: "x-backup-passphrase header must be at least 12 characters" });
+      return;
+    }
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      res.status(400).json({ error: "Encrypted backup payload is required" });
+      return;
+    }
+
+    try {
+      const result = restoreEncryptedDatabaseBackup(req.body as Buffer, passphrase);
+      res.json({ ok: true, backupPath: result.backupPath });
+    } catch (err) {
+      console.error("Failed to restore encrypted backup:", err);
+      res.status(500).json({
+        error: err instanceof Error ? err.message : "Failed to restore encrypted backup",
+      });
+    }
+  }
+);
 
 // DELETE /api/admin/users/:id — delete a user
 router.delete("/users/:id", requireAuth, requireAdmin, (req, res) => {
@@ -1086,6 +1291,159 @@ router.delete("/invites/:id", requireAuth, requireAdmin, (req, res) => {
     return;
   }
   res.json({ success: true });
+});
+
+// GET /api/admin/audit-logs — filterable/sortable audit log table data
+router.get("/audit-logs", requireAuth, requireAdmin, (req, res) => {
+  const db = getDb();
+  const page = Math.max(1, Number(req.query.page || 1) || 1);
+  const pageSize = Math.min(
+    200,
+    Math.max(10, Number(req.query.pageSize || 50) || 50)
+  );
+  const offset = (page - 1) * pageSize;
+
+  const where: string[] = [];
+  const params: Record<string, string | number> = {};
+
+  const method =
+    typeof req.query.method === "string" ? req.query.method.trim().toUpperCase() : "";
+  if (method) {
+    where.push("method = @method");
+    params.method = method;
+  }
+
+  const successRaw =
+    typeof req.query.success === "string" ? req.query.success.trim().toLowerCase() : "";
+  if (successRaw === "true" || successRaw === "false") {
+    where.push("success = @success");
+    params.success = successRaw === "true" ? 1 : 0;
+  }
+
+  const actor = typeof req.query.actor === "string" ? req.query.actor.trim() : "";
+  if (actor) {
+    where.push("(actor_username LIKE @actorLike OR actor_user_id LIKE @actorLike)");
+    params.actorLike = `%${actor}%`;
+  }
+
+  const pathContains = typeof req.query.path === "string" ? req.query.path.trim() : "";
+  if (pathContains) {
+    where.push("path LIKE @pathLike");
+    params.pathLike = `%${pathContains}%`;
+  }
+
+  const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  if (q) {
+    where.push(
+      "(action LIKE @qLike OR path LIKE @qLike OR actor_username LIKE @qLike OR error_message LIKE @qLike)"
+    );
+    params.qLike = `%${q}%`;
+  }
+
+  const statusMin = Number(req.query.statusMin);
+  if (Number.isFinite(statusMin) && statusMin > 0) {
+    where.push("status_code >= @statusMin");
+    params.statusMin = Math.floor(statusMin);
+  }
+
+  const statusMax = Number(req.query.statusMax);
+  if (Number.isFinite(statusMax) && statusMax > 0) {
+    where.push("status_code <= @statusMax");
+    params.statusMax = Math.floor(statusMax);
+  }
+
+  const from = typeof req.query.from === "string" ? req.query.from.trim() : "";
+  if (from) {
+    const parsed = new Date(from);
+    if (!Number.isNaN(parsed.getTime())) {
+      where.push("created_at >= @fromIso");
+      params.fromIso = parsed.toISOString();
+    }
+  }
+
+  const to = typeof req.query.to === "string" ? req.query.to.trim() : "";
+  if (to) {
+    const parsed = new Date(to);
+    if (!Number.isNaN(parsed.getTime())) {
+      where.push("created_at <= @toIso");
+      params.toIso = parsed.toISOString();
+    }
+  }
+
+  const sortByRaw = typeof req.query.sortBy === "string" ? req.query.sortBy.trim() : "";
+  const sortDirRaw =
+    typeof req.query.sortDir === "string" ? req.query.sortDir.trim().toUpperCase() : "";
+  const allowedSortBy = new Set([
+    "created_at",
+    "status_code",
+    "duration_ms",
+    "response_bytes",
+    "method",
+    "path",
+  ]);
+  const sortBy = allowedSortBy.has(sortByRaw) ? sortByRaw : "created_at";
+  const sortDir = sortDirRaw === "ASC" ? "ASC" : "DESC";
+
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const totalRow = db
+    .prepare(`SELECT COUNT(*) AS count FROM audit_logs ${whereSql}`)
+    .get(params) as { count: number };
+  const rows = db
+    .prepare(
+      `SELECT
+         id,
+         actor_user_id,
+         actor_username,
+         actor_is_admin,
+         method,
+         path,
+         status_code,
+         success,
+         action,
+         ip,
+         user_agent,
+         query_json,
+         body_json,
+         error_message,
+         duration_ms,
+         response_bytes,
+         created_at
+       FROM audit_logs
+       ${whereSql}
+       ORDER BY ${sortBy} ${sortDir}, id DESC
+       LIMIT @limit OFFSET @offset`
+    )
+    .all({
+      ...params,
+      limit: pageSize,
+      offset,
+    });
+
+  res.json({
+    rows,
+    total: totalRow.count,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(totalRow.count / pageSize)),
+    sortBy,
+    sortDir,
+  });
+});
+
+// GET /api/admin/resources — runtime system/network/connection metrics
+router.get("/resources", requireAuth, requireAdmin, (_req, res) => {
+  res.json(getResourceSnapshot());
+});
+
+// GET /api/admin/antivirus/test — verify configured clamd connectivity
+router.get("/antivirus/test", requireAuth, requireAdmin, async (_req, res) => {
+  const result = await testAntivirusConnection();
+  res.json(result);
+});
+
+// GET /api/admin/antivirus/install-instructions — manual setup helper
+router.get("/antivirus/install-instructions", requireAuth, requireAdmin, (_req, res) => {
+  res.json(getAntivirusInstallInstructions());
 });
 
 export default router;

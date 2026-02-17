@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   avatar_url TEXT,
   about TEXT,
+  desktop_notifications_enabled INTEGER NOT NULL DEFAULT 0,
+  desktop_notifications_mentions_only INTEGER NOT NULL DEFAULT 1,
   push_to_talk_enabled INTEGER DEFAULT 0,
   push_to_mute_enabled INTEGER DEFAULT 0,
   push_to_talk_key TEXT DEFAULT 'Space',
@@ -186,6 +188,33 @@ CREATE TABLE IF NOT EXISTS room_role_permissions (
   PRIMARY KEY (room_id, role_id)
 );
 
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  actor_user_id TEXT,
+  actor_username TEXT,
+  actor_is_admin INTEGER NOT NULL DEFAULT 0,
+  method TEXT NOT NULL,
+  path TEXT NOT NULL,
+  status_code INTEGER NOT NULL,
+  success INTEGER NOT NULL DEFAULT 0,
+  action TEXT NOT NULL,
+  ip TEXT,
+  user_agent TEXT,
+  query_json TEXT,
+  body_json TEXT,
+  error_message TEXT,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  response_bytes INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS remote_control_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  session_timeout_seconds INTEGER NOT NULL DEFAULT 300,
+  require_moderator_permission INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_room_id ON messages(room_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_message_reactions_message_id ON message_reactions(message_id);
@@ -201,6 +230,10 @@ CREATE INDEX IF NOT EXISTS idx_room_role_permissions_room_id ON room_role_permis
 CREATE INDEX IF NOT EXISTS idx_user_permission_overrides_user_id ON user_permission_overrides(user_id);
 CREATE INDEX IF NOT EXISTS idx_server_bans_created_at ON server_bans(created_at);
 CREATE INDEX IF NOT EXISTS idx_pinned_messages_pinned_at ON pinned_messages(pinned_at);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_user_id ON audit_logs(actor_user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_status_code ON audit_logs(status_code);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_path ON audit_logs(path);
 `;
 
 /** Migrations for existing databases. Each runs once, tracked by _migrations table. */

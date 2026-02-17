@@ -6,6 +6,7 @@ import { getConfig } from "../config.js";
 import { getDb } from "../db/database.js";
 import { requireAuth } from "../middleware/auth.js";
 import { getUserModerationState, getUserPermissions } from "../permissions.js";
+import { scanUploadForMalware } from "../services/antivirus.js";
 
 const router = Router();
 
@@ -98,6 +99,181 @@ function getDisposition(mimeType: string) {
   return "attachment";
 }
 
+function looksLikeJpeg(buf: Buffer) {
+  return buf.length >= 4 && buf[0] === 0xff && buf[1] === 0xd8;
+}
+
+function stripJpegExif(input: Buffer): { buffer: Buffer; stripped: boolean } {
+  if (!looksLikeJpeg(input)) return { buffer: input, stripped: false };
+  const out: Buffer[] = [input.subarray(0, 2)]; // SOI
+  let offset = 2;
+  let stripped = false;
+
+  while (offset + 4 <= input.length) {
+    if (input[offset] !== 0xff) {
+      return { buffer: input, stripped: false };
+    }
+
+    while (offset < input.length && input[offset] === 0xff) {
+      offset += 1;
+    }
+    if (offset >= input.length) break;
+    const marker = input[offset];
+    const markerStart = offset - 1;
+
+    // Start of scan: copy remaining compressed image data unchanged.
+    if (marker === 0xda) {
+      out.push(input.subarray(markerStart));
+      return { buffer: Buffer.concat(out), stripped };
+    }
+    // End of image.
+    if (marker === 0xd9) {
+      out.push(input.subarray(markerStart, markerStart + 2));
+      return { buffer: Buffer.concat(out), stripped };
+    }
+    // Standalone markers (no length field).
+    if ((marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) {
+      out.push(input.subarray(markerStart, markerStart + 2));
+      offset = markerStart + 2;
+      continue;
+    }
+
+    if (markerStart + 4 > input.length) {
+      return { buffer: input, stripped: false };
+    }
+    const segmentLength = input.readUInt16BE(markerStart + 2);
+    const segmentEnd = markerStart + 2 + segmentLength;
+    if (segmentLength < 2 || segmentEnd > input.length) {
+      return { buffer: input, stripped: false };
+    }
+
+    const isApp1 = marker === 0xe1;
+    if (isApp1) {
+      stripped = true;
+    } else {
+      out.push(input.subarray(markerStart, segmentEnd));
+    }
+    offset = segmentEnd;
+  }
+
+  return { buffer: input, stripped: false };
+}
+
+function looksLikePng(buf: Buffer) {
+  if (buf.length < 8) return false;
+  const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  for (let i = 0; i < sig.length; i += 1) {
+    if (buf[i] !== sig[i]) return false;
+  }
+  return true;
+}
+
+function stripPngMetadata(input: Buffer): { buffer: Buffer; stripped: boolean } {
+  if (!looksLikePng(input)) return { buffer: input, stripped: false };
+  const out: Buffer[] = [input.subarray(0, 8)];
+  let offset = 8;
+  let stripped = false;
+
+  while (offset + 12 <= input.length) {
+    const length = input.readUInt32BE(offset);
+    const chunkStart = offset;
+    const typeStart = offset + 4;
+    const dataStart = offset + 8;
+    const crcStart = dataStart + length;
+    const next = crcStart + 4;
+    if (length > 0x7fffffff || next > input.length) {
+      return { buffer: input, stripped: false };
+    }
+
+    const type = input.subarray(typeStart, typeStart + 4).toString("ascii");
+    const shouldStrip =
+      type === "eXIf" ||
+      type === "tEXt" ||
+      type === "zTXt" ||
+      type === "iTXt" ||
+      type === "tIME";
+
+    if (shouldStrip) {
+      stripped = true;
+    } else {
+      out.push(input.subarray(chunkStart, next));
+    }
+
+    offset = next;
+    if (type === "IEND") {
+      return { buffer: Buffer.concat(out), stripped };
+    }
+  }
+
+  return { buffer: input, stripped: false };
+}
+
+function looksLikeWebp(buf: Buffer) {
+  return (
+    buf.length >= 12 &&
+    buf.subarray(0, 4).toString("ascii") === "RIFF" &&
+    buf.subarray(8, 12).toString("ascii") === "WEBP"
+  );
+}
+
+function stripWebpMetadata(input: Buffer): { buffer: Buffer; stripped: boolean } {
+  if (!looksLikeWebp(input)) return { buffer: input, stripped: false };
+  const out: Buffer[] = [Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WEBP")];
+  let offset = 12;
+  let stripped = false;
+
+  while (offset + 8 <= input.length) {
+    const chunkId = input.subarray(offset, offset + 4).toString("ascii");
+    const chunkSize = input.readUInt32LE(offset + 4);
+    const dataStart = offset + 8;
+    const paddedSize = chunkSize + (chunkSize % 2);
+    const next = dataStart + paddedSize;
+    if (next > input.length) {
+      return { buffer: input, stripped: false };
+    }
+
+    const shouldStrip = chunkId === "EXIF" || chunkId === "XMP ";
+    if (shouldStrip) {
+      stripped = true;
+    } else {
+      out.push(input.subarray(offset, next));
+    }
+    offset = next;
+  }
+
+  const merged = Buffer.concat(out);
+  // RIFF size excludes first 8 bytes.
+  merged.writeUInt32LE(Math.max(0, merged.length - 8), 4);
+  return { buffer: merged, stripped };
+}
+
+function maybeStripImageMetadata(
+  payload: Buffer,
+  mimeType: string,
+  originalName: string,
+  enabled: boolean
+): { buffer: Buffer; stripped: boolean } {
+  if (!enabled) return { buffer: payload, stripped: false };
+  const lower = originalName.toLowerCase();
+  const lowerMime = mimeType.toLowerCase();
+  const isJpegMime = mimeType.toLowerCase().startsWith("image/jpeg");
+  const isJpegName = lower.endsWith(".jpg") || lower.endsWith(".jpeg");
+  if (isJpegMime || isJpegName || looksLikeJpeg(payload)) {
+    return stripJpegExif(payload);
+  }
+  const isPngMime = lowerMime.startsWith("image/png");
+  const isPngName = lower.endsWith(".png");
+  if (isPngMime || isPngName || looksLikePng(payload)) {
+    return stripPngMetadata(payload);
+  }
+  const isWebpMime = lowerMime.startsWith("image/webp");
+  const isWebpName = lower.endsWith(".webp");
+  if (isWebpMime || isWebpName || looksLikeWebp(payload)) {
+    return stripWebpMetadata(payload);
+  }
+  return { buffer: payload, stripped: false };
+}
+
 // POST /api/files/upload
 // Upload raw bytes with header:
 //   x-file-name: original file name
@@ -107,7 +283,7 @@ router.post(
   "/upload",
   requireAuth,
   parseUploadBody,
-  (req, res) => {
+  async (req, res) => {
     const user = (req as any).user as { userId: string; isAdmin: boolean };
     const db = getDb();
     const config = getConfig();
@@ -157,8 +333,35 @@ router.post(
     const fullPath = safeResolveStoragePath(storageRoot, relativeStoragePath);
 
     try {
+      const scanResult = await scanUploadForMalware(body);
+      if (scanResult.infected) {
+        res.status(422).json({
+          error: `Upload rejected by malware scan (${scanResult.threatName})`,
+        });
+        return;
+      }
+      if (!scanResult.clean) {
+        if (config.files.antivirus.failClosed) {
+          res.status(503).json({
+            error: "Upload rejected because malware scanner is unavailable",
+          });
+          return;
+        }
+        console.warn(
+          `  Warning: malware scan failed but upload allowed (failClosed=false): ${scanResult.detail}`
+        );
+      }
+
+      const exifResult = maybeStripImageMetadata(
+        body,
+        mimeType,
+        originalName,
+        config.files.stripImageExif === true
+      );
+      const storedBytes = exifResult.buffer;
+
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-      fs.writeFileSync(fullPath, body);
+      fs.writeFileSync(fullPath, storedBytes);
 
       db.prepare(
         `INSERT INTO attachments
@@ -169,7 +372,7 @@ router.post(
         user.userId,
         originalName,
         mimeType,
-        body.length,
+        storedBytes.length,
         relativeStoragePath,
       );
 
@@ -177,7 +380,9 @@ router.post(
         id: attachmentId,
         originalName,
         mimeType,
-        sizeBytes: body.length,
+        sizeBytes: storedBytes.length,
+        exifStripped: exifResult.stripped,
+        metadataStripped: exifResult.stripped,
         url: `/api/files/${attachmentId}`,
       });
     } catch (err) {

@@ -622,6 +622,8 @@ router.get("/me", requireAuth, (req, res) => {
     .prepare(
       `SELECT id, username, email, avatar_url, about, status,
               activity_game,
+              desktop_notifications_enabled,
+              desktop_notifications_mentions_only,
               push_to_talk_enabled, push_to_mute_enabled, push_to_talk_key,
               audio_input_sensitivity,
               noise_suppression_mode,
@@ -925,6 +927,24 @@ router.put("/profile", requireAuth, (req, res) => {
     updates.push_to_talk_enabled = value === true || value === 1 ? 1 : 0;
   }
 
+  if (req.body.desktop_notifications_enabled !== undefined) {
+    const value = req.body.desktop_notifications_enabled;
+    if (typeof value !== "boolean" && value !== 0 && value !== 1) {
+      res.status(400).json({ error: "desktop_notifications_enabled must be a boolean" });
+      return;
+    }
+    updates.desktop_notifications_enabled = value === true || value === 1 ? 1 : 0;
+  }
+
+  if (req.body.desktop_notifications_mentions_only !== undefined) {
+    const value = req.body.desktop_notifications_mentions_only;
+    if (typeof value !== "boolean" && value !== 0 && value !== 1) {
+      res.status(400).json({ error: "desktop_notifications_mentions_only must be a boolean" });
+      return;
+    }
+    updates.desktop_notifications_mentions_only = value === true || value === 1 ? 1 : 0;
+  }
+
   if (req.body.push_to_mute_enabled !== undefined) {
     const value = req.body.push_to_mute_enabled;
     if (
@@ -1041,6 +1061,14 @@ router.put("/profile", requireAuth, (req, res) => {
   const hasAbout = Object.prototype.hasOwnProperty.call(updates, "about");
   const hasStatus = Object.prototype.hasOwnProperty.call(updates, "status");
   const hasPushToTalkEnabled = Object.prototype.hasOwnProperty.call(updates, "push_to_talk_enabled");
+  const hasDesktopNotificationsEnabled = Object.prototype.hasOwnProperty.call(
+    updates,
+    "desktop_notifications_enabled"
+  );
+  const hasDesktopNotificationsMentionsOnly = Object.prototype.hasOwnProperty.call(
+    updates,
+    "desktop_notifications_mentions_only"
+  );
   const hasPushToMuteEnabled = Object.prototype.hasOwnProperty.call(updates, "push_to_mute_enabled");
   const hasPushToTalkKey = Object.prototype.hasOwnProperty.call(updates, "push_to_talk_key");
   const hasAudioInputSensitivity = Object.prototype.hasOwnProperty.call(updates, "audio_input_sensitivity");
@@ -1057,6 +1085,8 @@ router.put("/profile", requireAuth, (req, res) => {
     !hasAbout &&
     !hasStatus &&
     !hasPushToTalkEnabled &&
+    !hasDesktopNotificationsEnabled &&
+    !hasDesktopNotificationsMentionsOnly &&
     !hasPushToMuteEnabled &&
     !hasPushToTalkKey &&
     !hasAudioInputSensitivity &&
@@ -1080,6 +1110,14 @@ router.put("/profile", requireAuth, (req, res) => {
          push_to_talk_enabled = CASE
            WHEN @hasPushToTalkEnabled THEN @pushToTalkEnabled
            ELSE push_to_talk_enabled
+         END,
+         desktop_notifications_enabled = CASE
+           WHEN @hasDesktopNotificationsEnabled THEN @desktopNotificationsEnabled
+           ELSE desktop_notifications_enabled
+         END,
+         desktop_notifications_mentions_only = CASE
+           WHEN @hasDesktopNotificationsMentionsOnly THEN @desktopNotificationsMentionsOnly
+           ELSE desktop_notifications_mentions_only
          END,
          push_to_mute_enabled = CASE
            WHEN @hasPushToMuteEnabled THEN @pushToMuteEnabled
@@ -1115,6 +1153,10 @@ router.put("/profile", requireAuth, (req, res) => {
     status: updates.status,
     hasPushToTalkEnabled: hasPushToTalkEnabled ? 1 : 0,
     pushToTalkEnabled: updates.push_to_talk_enabled,
+    hasDesktopNotificationsEnabled: hasDesktopNotificationsEnabled ? 1 : 0,
+    desktopNotificationsEnabled: updates.desktop_notifications_enabled,
+    hasDesktopNotificationsMentionsOnly: hasDesktopNotificationsMentionsOnly ? 1 : 0,
+    desktopNotificationsMentionsOnly: updates.desktop_notifications_mentions_only,
     hasPushToMuteEnabled: hasPushToMuteEnabled ? 1 : 0,
     pushToMuteEnabled: updates.push_to_mute_enabled,
     hasPushToTalkKey: hasPushToTalkKey ? 1 : 0,
@@ -1140,6 +1182,8 @@ router.put("/profile", requireAuth, (req, res) => {
     .prepare(
       `SELECT id, username, email, avatar_url, about, status,
               activity_game,
+              desktop_notifications_enabled,
+              desktop_notifications_mentions_only,
               push_to_talk_enabled, push_to_mute_enabled, push_to_talk_key,
               audio_input_sensitivity,
               noise_suppression_mode,
