@@ -22,7 +22,7 @@ function parseUploadBody(
   );
 
   express.raw({
-    type: "application/octet-stream",
+    type: "*/*",
     limit: `${maxUploadSizeMB}mb`,
   })(req, res, (err?: unknown) => {
     if (!err) {

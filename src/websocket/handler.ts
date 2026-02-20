@@ -2493,25 +2493,107 @@ export function setupSocketHandlers(io: Server) {
       }
     );
 
-    // Get all DM rooms for the current user
+    // Get all DM rooms for the current user (supports 1:1 and group DMs)
     socket.on("dm:get", () => {
       const myUserId = jwtUser.userId;
-      const dmRooms = db
+      const rawRooms = db
         .prepare(
-          `SELECT r.*, rm_other.user_id AS other_user_id,
-                  u.username AS other_username, u.avatar_url AS other_avatar_url,
-                  u.status AS other_status
+          `SELECT r.*,
+                  json_group_array(json_object(
+                    'id', u.id,
+                    'username', u.username,
+                    'avatar_url', u.avatar_url,
+                    'status', u.status
+                  )) AS other_members_json
            FROM rooms r
            JOIN room_members rm ON r.id = rm.room_id AND rm.user_id = ?
            JOIN room_members rm_other ON r.id = rm_other.room_id AND rm_other.user_id != ?
            JOIN users u ON rm_other.user_id = u.id
            WHERE r.type = 'dm'
+           GROUP BY r.id
            ORDER BY r.created_at DESC`
         )
-        .all(myUserId, myUserId);
+        .all(myUserId, myUserId) as Array<Record<string, unknown>>;
+
+      const dmRooms = rawRooms.map((row) => {
+        const members = JSON.parse((row.other_members_json as string) || "[]") as Array<{
+          id: string; username: string; avatar_url: string | null; status: string;
+        }>;
+        const result: Record<string, unknown> = { ...row };
+        delete result.other_members_json;
+        result.other_members = members;
+        // Backward compat: set singular other_user fields for 1:1 DMs
+        if (members.length >= 1) {
+          result.other_user_id = members[0].id;
+          result.other_username = members[0].username;
+          result.other_avatar_url = members[0].avatar_url;
+          result.other_status = members[0].status;
+        }
+        return result;
+      });
 
       socket.emit("dm:list", dmRooms);
     });
+
+    // Create a group DM with multiple members
+    socket.on(
+      "dm:create-group",
+      (
+        { memberIds }: { memberIds: string[] },
+        ack?: (payload: { ok: boolean; error?: string; room?: Record<string, unknown> }) => void
+      ) => {
+        const myUserId = jwtUser.userId;
+        const uniqueOtherIds = [...new Set((memberIds || []).filter((id) => id && id !== myUserId))];
+        if (uniqueOtherIds.length === 0) {
+          if (ack) ack({ ok: false, error: "Need at least one other member" });
+          return;
+        }
+
+        const allMemberIds = [myUserId, ...uniqueOtherIds];
+        const roomId = crypto.randomUUID();
+        db.prepare(
+          "INSERT INTO rooms (id, name, type, created_by) VALUES (?, ?, 'dm', ?)"
+        ).run(roomId, `group-${roomId}`, myUserId);
+        for (const uid of allMemberIds) {
+          db.prepare(
+            "INSERT INTO room_members (room_id, user_id) VALUES (?, ?)"
+          ).run(roomId, uid);
+        }
+
+        // Build room with member info
+        function buildGroupDmRoom(forUserId: string): Record<string, unknown> {
+          const baseRoom = db.prepare("SELECT * FROM rooms WHERE id = ?").get(roomId) as Record<string, unknown>;
+          const otherIds = allMemberIds.filter((id) => id !== forUserId);
+          const otherMembers = otherIds
+            .map((uid) =>
+              db.prepare("SELECT id, username, avatar_url, status FROM users WHERE id = ?").get(uid)
+            )
+            .filter(Boolean) as Array<{ id: string; username: string; avatar_url: string | null; status: string }>;
+          const result: Record<string, unknown> = { ...baseRoom };
+          result.other_members = otherMembers;
+          if (otherMembers.length >= 1) {
+            result.other_user_id = otherMembers[0].id;
+            result.other_username = otherMembers[0].username;
+            result.other_avatar_url = otherMembers[0].avatar_url;
+            result.other_status = otherMembers[0].status;
+          }
+          return result;
+        }
+
+        const myRoom = buildGroupDmRoom(myUserId);
+        if (ack) ack({ ok: true, room: myRoom });
+
+        // Notify all other members
+        for (const uid of uniqueOtherIds) {
+          const theirRoom = buildGroupDmRoom(uid);
+          for (const [sid, cu] of connectedUsers.entries()) {
+            if (cu.userId === uid) {
+              io.to(sid).emit("dm:new", theirRoom);
+            }
+          }
+        }
+      }
+    );
 
     socket.on(
       "call:start",

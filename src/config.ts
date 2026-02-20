@@ -132,7 +132,7 @@ const DEFAULT_CONFIG: ServerConfig = {
     minPasswordLength: 10,
   },
   rooms: {
-    userCanCreate: true,
+    userCanCreate: false,
     defaults: [
       { id: "general", name: "general", type: "text" },
       { id: "random", name: "random", type: "text" },
