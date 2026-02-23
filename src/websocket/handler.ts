@@ -53,6 +53,24 @@ const activeRemoteControlSessions = new Map<
 const rateLimitBuckets = new Map<string, number[]>();
 const OFFLINE_GRACE_MS = 8000;
 
+// Voice channel occupancy: roomId -> Set<userId>
+// Tracks which users are currently connected to each permanent voice channel.
+const voiceChannelOccupancy = new Map<string, Set<string>>();
+
+// DM call state
+type PendingDmCallRing = {
+  dmRoomId: string;
+  callerUserId: string;
+  calleeUserId: string;
+  timeoutHandle: ReturnType<typeof setTimeout>;
+};
+type ActiveDmCall = { callerUserId: string; calleeUserId: string };
+// dmRoomId -> pending ring (unanswered)
+const pendingDmCallRings = new Map<string, PendingDmCallRing>();
+// dmRoomId -> active call (both connected)
+const activeDmCalls = new Map<string, ActiveDmCall>();
+const DM_CALL_RING_TIMEOUT_MS = 30_000;
+
 function getRemoteControlTimeoutMs(db: ReturnType<typeof getDb>): number {
   const row = db
     .prepare(
@@ -107,6 +125,54 @@ function broadcastPresence(io: Server) {
     )
     .all();
   io.emit("users:list", users);
+}
+
+type VoiceStateUser = {
+  id: string;
+  username: string;
+  avatar_url: string | null;
+  status: string;
+  role_color: string;
+};
+
+function buildVoiceStatePayload(db: ReturnType<typeof getDb>): { channels: Record<string, VoiceStateUser[]> } {
+  const channels: Record<string, VoiceStateUser[]> = {};
+  for (const [roomId, userIds] of voiceChannelOccupancy.entries()) {
+    if (userIds.size === 0) {
+      voiceChannelOccupancy.delete(roomId);
+      continue;
+    }
+    const ids = Array.from(userIds);
+    const placeholders = ids.map(() => "?").join(", ");
+    const rows = db
+      .prepare(
+        `SELECT u.id, u.username, u.avatar_url, u.status,
+                COALESCE(
+                  (
+                    SELECT r.color
+                    FROM user_roles ur
+                    JOIN roles r ON r.id = ur.role_id
+                    WHERE ur.user_id = u.id
+                    ORDER BY r.position DESC, r.created_at DESC
+                    LIMIT 1
+                  ),
+                  '#94a3b8'
+                ) AS role_color
+         FROM users u
+         WHERE u.id IN (${placeholders})`
+      )
+      .all(...ids) as VoiceStateUser[];
+    if (rows.length > 0) {
+      channels[roomId] = rows;
+    }
+  }
+  return { channels };
+}
+
+/** Broadcast voice channel occupancy to all connected clients */
+function broadcastVoiceState(io: Server) {
+  const db = getDb();
+  io.emit("voice:state", buildVoiceStatePayload(db));
 }
 
 /** Check if a user has any other active sockets besides the given one */
@@ -831,6 +897,8 @@ export function setupSocketHandlers(io: Server) {
       jwtUser.userId
     );
     broadcastPresence(io);
+    // Send current voice channel occupancy to the newly connected client.
+    socket.emit("voice:state", buildVoiceStatePayload(db));
     if (getManagePerms().canManageRoles) {
       emitRoleStateToAdmins(io, db);
     }
@@ -1839,6 +1907,34 @@ export function setupSocketHandlers(io: Server) {
 
     });
 
+    // Report joining a voice channel (broadcasts occupancy to all clients)
+    socket.on("voice:join", ({ roomId }: { roomId?: string }) => {
+      if (!roomId) return;
+      const roomMeta = db
+        .prepare("SELECT type FROM rooms WHERE id = ? AND type = 'voice' AND is_temporary = 0")
+        .get(roomId) as { type: string } | undefined;
+      if (!roomMeta) return;
+      if (!canAccessRoom(db, roomId, jwtUser.userId, jwtUser.isAdmin)) return;
+      if (!voiceChannelOccupancy.has(roomId)) {
+        voiceChannelOccupancy.set(roomId, new Set());
+      }
+      voiceChannelOccupancy.get(roomId)!.add(jwtUser.userId);
+      broadcastVoiceState(io);
+    });
+
+    // Report leaving a voice channel
+    socket.on("voice:leave", ({ roomId }: { roomId?: string }) => {
+      if (!roomId) return;
+      const channelUsers = voiceChannelOccupancy.get(roomId);
+      if (channelUsers) {
+        channelUsers.delete(jwtUser.userId);
+        if (channelUsers.size === 0) {
+          voiceChannelOccupancy.delete(roomId);
+        }
+      }
+      broadcastVoiceState(io);
+    });
+
     // Load older messages before a given timestamp
     socket.on(
       "message:loadMore",
@@ -2595,6 +2691,191 @@ export function setupSocketHandlers(io: Server) {
       }
     );
 
+    // ── DM Call events (ring-and-answer) ───────────────────────────────────
+    // Ring a user for a DM voice call. Creates DM room if needed.
+    socket.on(
+      "dm:call:ring",
+      (
+        { targetUserId }: { targetUserId: string },
+        ack?: (payload: { ok: boolean; error?: string; dmRoomId?: string; dmRoom?: Record<string, unknown> }) => void
+      ) => {
+        const callerUserId = jwtUser.userId;
+        if (!targetUserId || targetUserId === callerUserId) {
+          if (ack) ack({ ok: false, error: "Invalid call target" });
+          return;
+        }
+        const ban = db
+          .prepare("SELECT user_id FROM server_bans WHERE user_id = ?")
+          .get(callerUserId) as { user_id: string } | undefined;
+        if (ban) {
+          if (ack) ack({ ok: false, error: "You are banned from this server" });
+          return;
+        }
+        // Find or create the DM room between these two users
+        const existingRoom = db
+          .prepare(
+            `SELECT r.*, rm_other.user_id AS other_user_id,
+                    u.username AS other_username, u.avatar_url AS other_avatar_url,
+                    u.status AS other_status
+             FROM rooms r
+             JOIN room_members rm1 ON r.id = rm1.room_id AND rm1.user_id = ?
+             JOIN room_members rm2 ON r.id = rm2.room_id AND rm2.user_id = ?
+             JOIN room_members rm_other ON r.id = rm_other.room_id AND rm_other.user_id = ?
+             JOIN users u ON rm_other.user_id = u.id
+             WHERE r.type = 'dm'
+             LIMIT 1`
+          )
+          .get(callerUserId, targetUserId, targetUserId) as Record<string, unknown> | undefined;
+
+        let dmRoom: Record<string, unknown>;
+        let dmRoomId: string;
+        if (existingRoom) {
+          dmRoom = existingRoom;
+          dmRoomId = existingRoom.id as string;
+        } else {
+          // Create new DM room
+          dmRoomId = crypto.randomUUID();
+          const dmName = `dm-${dmRoomId}`;
+          db.prepare("INSERT INTO rooms (id, name, type, created_by) VALUES (?, ?, 'dm', ?)").run(dmRoomId, dmName, callerUserId);
+          db.prepare("INSERT INTO room_members (room_id, user_id) VALUES (?, ?)").run(dmRoomId, callerUserId);
+          db.prepare("INSERT INTO room_members (room_id, user_id) VALUES (?, ?)").run(dmRoomId, targetUserId);
+          const newRoom = db
+            .prepare(`SELECT r.*, ? AS other_user_id, u.username AS other_username, u.avatar_url AS other_avatar_url, u.status AS other_status FROM rooms r JOIN users u ON u.id = ? WHERE r.id = ?`)
+            .get(targetUserId, targetUserId, dmRoomId) as Record<string, unknown>;
+          dmRoom = newRoom;
+          // Notify the target that a new DM room was opened
+          const myProfile = db.prepare("SELECT username, avatar_url, status FROM users WHERE id = ?").get(callerUserId) as { username: string; avatar_url: string | null; status: string } | undefined;
+          const targetView = db.prepare("SELECT * FROM rooms WHERE id = ?").get(dmRoomId) as Record<string, unknown>;
+          if (targetView && myProfile) {
+            (targetView as any).other_user_id = callerUserId;
+            (targetView as any).other_username = myProfile.username;
+            (targetView as any).other_avatar_url = myProfile.avatar_url;
+            (targetView as any).other_status = myProfile.status;
+          }
+          for (const [sid, cu] of connectedUsers.entries()) {
+            if (cu.userId === targetUserId) io.to(sid).emit("dm:new", targetView);
+          }
+        }
+
+        // Don't allow a new ring if one is already pending or active for this DM
+        if (pendingDmCallRings.has(dmRoomId)) {
+          if (ack) ack({ ok: false, error: "A call is already ringing" });
+          return;
+        }
+        if (activeDmCalls.has(dmRoomId)) {
+          if (ack) ack({ ok: false, error: "A call is already active" });
+          return;
+        }
+
+        const callerUsername = connectedUsers.get(socket.id)?.username || jwtUser.username;
+        const timeoutHandle = setTimeout(() => {
+          pendingDmCallRings.delete(dmRoomId);
+          emitToUser(callerUserId, "dm:call:unanswered", { dmRoomId });
+          emitToUser(targetUserId, "dm:call:expired", { dmRoomId });
+        }, DM_CALL_RING_TIMEOUT_MS);
+
+        pendingDmCallRings.set(dmRoomId, {
+          dmRoomId,
+          callerUserId,
+          calleeUserId: targetUserId,
+          timeoutHandle,
+        });
+
+        // Notify callee of the incoming call
+        emitToUser(targetUserId, "dm:call:incoming", {
+          dmRoomId,
+          callerUserId,
+          callerUsername,
+          dmRoom,
+        });
+
+        if (ack) ack({ ok: true, dmRoomId, dmRoom });
+      }
+    );
+
+    // Callee accepts the incoming DM call
+    socket.on(
+      "dm:call:answer",
+      (
+        { dmRoomId }: { dmRoomId: string },
+        ack?: (payload: { ok: boolean; error?: string }) => void
+      ) => {
+        const calleeUserId = jwtUser.userId;
+        const pending = pendingDmCallRings.get(dmRoomId);
+        if (!pending || pending.calleeUserId !== calleeUserId) {
+          if (ack) ack({ ok: false, error: "No pending call found" });
+          return;
+        }
+        clearTimeout(pending.timeoutHandle);
+        pendingDmCallRings.delete(dmRoomId);
+        activeDmCalls.set(dmRoomId, { callerUserId: pending.callerUserId, calleeUserId });
+        emitToUser(pending.callerUserId, "dm:call:accepted", { dmRoomId });
+        if (ack) ack({ ok: true });
+      }
+    );
+
+    // Callee declines the incoming DM call
+    socket.on(
+      "dm:call:decline",
+      (
+        { dmRoomId }: { dmRoomId: string },
+        ack?: (payload: { ok: boolean; error?: string }) => void
+      ) => {
+        const calleeUserId = jwtUser.userId;
+        const pending = pendingDmCallRings.get(dmRoomId);
+        if (!pending || pending.calleeUserId !== calleeUserId) {
+          if (ack) ack({ ok: false, error: "No pending call found" });
+          return;
+        }
+        clearTimeout(pending.timeoutHandle);
+        pendingDmCallRings.delete(dmRoomId);
+        emitToUser(pending.callerUserId, "dm:call:declined", { dmRoomId });
+        if (ack) ack({ ok: true });
+      }
+    );
+
+    // Caller cancels the ring before the callee answers
+    socket.on(
+      "dm:call:cancel",
+      (
+        { dmRoomId }: { dmRoomId: string },
+        ack?: (payload: { ok: boolean; error?: string }) => void
+      ) => {
+        const callerUserId = jwtUser.userId;
+        const pending = pendingDmCallRings.get(dmRoomId);
+        if (!pending || pending.callerUserId !== callerUserId) {
+          if (ack) ack({ ok: false, error: "No pending call found" });
+          return;
+        }
+        clearTimeout(pending.timeoutHandle);
+        pendingDmCallRings.delete(dmRoomId);
+        emitToUser(pending.calleeUserId, "dm:call:cancelled", { dmRoomId });
+        if (ack) ack({ ok: true });
+      }
+    );
+
+    // Either party ends an active DM call
+    socket.on(
+      "dm:call:end",
+      (
+        { dmRoomId }: { dmRoomId: string },
+        ack?: (payload: { ok: boolean; error?: string }) => void
+      ) => {
+        const userId = jwtUser.userId;
+        const active = activeDmCalls.get(dmRoomId);
+        if (!active || (active.callerUserId !== userId && active.calleeUserId !== userId)) {
+          if (ack) ack({ ok: false, error: "No active call found" });
+          return;
+        }
+        activeDmCalls.delete(dmRoomId);
+        const otherId = active.callerUserId === userId ? active.calleeUserId : active.callerUserId;
+        emitToUser(otherId, "dm:call:ended", { dmRoomId, endedBy: userId });
+        // Also send to self so local state clears consistently
+        emitToUser(userId, "dm:call:ended", { dmRoomId, endedBy: userId });
+        if (ack) ack({ ok: true });
+      }
+    );
+
     socket.on(
       "call:start",
       (
@@ -2704,21 +2985,15 @@ export function setupSocketHandlers(io: Server) {
           if (ack) ack({ ok: false, error: "Call not found" });
           return;
         }
-        if (callRoom.owner_user_id === jwtUser.userId) {
-          const participantIds = getCallParticipantIds(db, roomId);
-          db.prepare("DELETE FROM rooms WHERE id = ?").run(roomId);
-          for (const [sid, cu] of connectedUsers.entries()) {
-            if (participantIds.includes(cu.userId)) {
-              io.to(sid).emit("call:ended", { roomId, endedBy: jwtUser.userId });
-              io.sockets.sockets.get(sid)?.leave(roomId);
-            }
+        // Any participant leaving a DM/temporary call ends the call for everyone
+        const participantIds = getCallParticipantIds(db, roomId);
+        db.prepare("DELETE FROM rooms WHERE id = ?").run(roomId);
+        for (const [sid, cu] of connectedUsers.entries()) {
+          if (participantIds.includes(cu.userId)) {
+            io.to(sid).emit("call:ended", { roomId, endedBy: jwtUser.userId });
+            io.sockets.sockets.get(sid)?.leave(roomId);
           }
-          if (ack) ack({ ok: true });
-          return;
         }
-        db.prepare("DELETE FROM room_members WHERE room_id = ? AND user_id = ?").run(roomId, jwtUser.userId);
-        socket.leave(roomId);
-        emitCallState(io, db, roomId);
         if (ack) ack({ ok: true });
       }
     );
@@ -3188,6 +3463,40 @@ export function setupSocketHandlers(io: Server) {
             user.userId
           );
           emitCallState(io, db, call.room_id);
+        }
+
+        // Clean up voice channel occupancy for this user
+        let voiceOccupancyChanged = false;
+        for (const [roomId, userIds] of voiceChannelOccupancy.entries()) {
+          if (userIds.delete(user.userId)) {
+            voiceOccupancyChanged = true;
+            if (userIds.size === 0) {
+              voiceChannelOccupancy.delete(roomId);
+            }
+          }
+        }
+        if (voiceOccupancyChanged) {
+          broadcastVoiceState(io);
+        }
+
+        // Clean up DM call state for this user
+        for (const [dmRoomId, pending] of Array.from(pendingDmCallRings.entries())) {
+          if (pending.callerUserId === user.userId) {
+            clearTimeout(pending.timeoutHandle);
+            pendingDmCallRings.delete(dmRoomId);
+            emitToUser(pending.calleeUserId, "dm:call:cancelled", { dmRoomId });
+          } else if (pending.calleeUserId === user.userId) {
+            clearTimeout(pending.timeoutHandle);
+            pendingDmCallRings.delete(dmRoomId);
+            emitToUser(pending.callerUserId, "dm:call:unanswered", { dmRoomId });
+          }
+        }
+        for (const [dmRoomId, active] of Array.from(activeDmCalls.entries())) {
+          if (active.callerUserId === user.userId || active.calleeUserId === user.userId) {
+            activeDmCalls.delete(dmRoomId);
+            const otherId = active.callerUserId === user.userId ? active.calleeUserId : active.callerUserId;
+            emitToUser(otherId, "dm:call:ended", { dmRoomId, endedBy: user.userId });
+          }
         }
 
         console.log(`User disconnected: ${user.username}`);
