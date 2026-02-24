@@ -371,7 +371,7 @@ if [ "${INSTALL_MODE}" = "docker" ]; then
   if [ -d "${APP_DIR}/.git" ]; then
     info "Updating existing installation..."
     cd "$APP_DIR"
-    git fetch --all --quiet
+    git fetch --all --tags --quiet
     if [ "$VERSION" = "main" ]; then
       git checkout main --quiet
       git pull --quiet
@@ -896,7 +896,7 @@ if [ -d "${APP_DIR}/.git" ]; then
   ROLLBACK_READY=true
 
   cd "$APP_DIR"
-  git fetch --all --quiet
+  git fetch --all --tags --quiet
   if [ "$VERSION" = "main" ]; then
     git checkout main --quiet
     git pull --quiet
