@@ -32,6 +32,10 @@ async function main() {
   if (!migrateOnly && (forceSetup || needsSetup())) {
     const flags = parseSetupFlags(args);
     await runSetup(flags);
+    if (forceSetup) {
+      // Invoked explicitly with --setup (installer mode); exit cleanly after setup
+      process.exit(0);
+    }
   }
 
   // Load config (may have been written/updated by setup)

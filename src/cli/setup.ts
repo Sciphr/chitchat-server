@@ -205,7 +205,7 @@ export async function runSetup(flags?: SetupFlags | null): Promise<void> {
   if (flags?.adminEmail && flags?.adminUsername && flags?.adminPassword) {
     // Non-interactive mode (flags or env vars)
     serverName = flags.serverName || "My ChitChat Server";
-    port = flags.port ? parseInt(flags.port, 10) : 3001;
+    port = flags.port ? parseInt(flags.port, 10) : (process.env.PORT ? parseInt(process.env.PORT, 10) : 3001);
     adminEmail = flags.adminEmail;
     adminUsername = flags.adminUsername;
     adminPassword = flags.adminPassword;
@@ -232,8 +232,12 @@ export async function runSetup(flags?: SetupFlags | null): Promise<void> {
 
     try {
       serverName = await ask(rl, "Server name", "My ChitChat Server");
-      const portStr = await ask(rl, "Port", "3001");
-      port = parseInt(portStr, 10) || 3001;
+      if (process.env.PORT) {
+        port = parseInt(process.env.PORT, 10) || 3001;
+      } else {
+        const portStr = await ask(rl, "Port", "3001");
+        port = parseInt(portStr, 10) || 3001;
+      }
 
       console.log();
       console.log(`${YELLOW}  Admin Account${RESET}`);
