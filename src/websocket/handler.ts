@@ -1907,6 +1907,11 @@ export function setupSocketHandlers(io: Server) {
 
     });
 
+    // Client requests current voice state (called after listener is registered to avoid missing the initial emit)
+    socket.on("voice:state:request", () => {
+      socket.emit("voice:state", buildVoiceStatePayload(db));
+    });
+
     // Report joining a voice channel (broadcasts occupancy to all clients)
     socket.on("voice:join", ({ roomId }: { roomId?: string }) => {
       if (!roomId) return;

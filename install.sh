@@ -238,7 +238,24 @@ if [ "${MODE_EXPLICIT}" != "true" ]; then
   fi
 fi
 
-if [ "${INSTALL_MODE}" = "docker" ] && [ "${NON_INTERACTIVE}" != "true" ] && [ -r /dev/tty ]; then
+# On updates, read existing values from .env to skip re-prompting
+if [ -f "${APP_DIR}/.env" ]; then
+  _existing_host_port="$(grep '^HOST_PORT=' "${APP_DIR}/.env" 2>/dev/null | head -1 | cut -d= -f2-)"
+  if [ -n "${_existing_host_port}" ]; then
+    DOCKER_HOST_PORT="${_existing_host_port}"
+    info "Using existing Docker host port from .env: ${DOCKER_HOST_PORT}"
+    # Skip the port prompt entirely
+    _skip_port_prompt=true
+  fi
+  _existing_clamav="$(grep '^FILES_AV_ENABLED=' "${APP_DIR}/.env" 2>/dev/null | head -1 | cut -d= -f2-)"
+  if [ -n "${_existing_clamav}" ]; then
+    [ "${_existing_clamav}" = "true" ] && INSTALL_CLAMAV=true || INSTALL_CLAMAV=false
+    CLAMAV_DECISION_EXPLICIT=true
+    info "Using existing ClamAV setting from .env: FILES_AV_ENABLED=${_existing_clamav}"
+  fi
+fi
+
+if [ "${INSTALL_MODE}" = "docker" ] && [ "${_skip_port_prompt}" != "true" ] && [ "${NON_INTERACTIVE}" != "true" ] && [ -r /dev/tty ]; then
   read -r -p "Docker host port for ChitChat [${DOCKER_HOST_PORT}]: " docker_port_input </dev/tty || docker_port_input=""
   if [ -n "${docker_port_input}" ]; then
     if [[ "${docker_port_input}" =~ ^[0-9]+$ ]] && [ "${docker_port_input}" -ge 1 ] && [ "${docker_port_input}" -le 65535 ]; then
