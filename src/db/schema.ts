@@ -248,7 +248,7 @@ export const MIGRATIONS: Array<{ name: string; sql: string }> = [
         created_by TEXT DEFAULT 'system',
         created_at TEXT DEFAULT (datetime('now'))
       );
-      INSERT OR IGNORE INTO rooms_new SELECT * FROM rooms;
+      INSERT OR IGNORE INTO rooms_new (id, name, type, created_by, created_at) SELECT id, name, type, created_by, created_at FROM rooms;
       DROP TABLE rooms;
       ALTER TABLE rooms_new RENAME TO rooms;
     `,
