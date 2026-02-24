@@ -453,6 +453,9 @@ EOF
     ensure_env_var "${APP_DIR}/.env" "FILES_AV_ENABLED" "false"
   fi
 
+  # CORS_ALLOWED_ORIGINS is left as-is from .env.example (* by default).
+  # Users locking down to HTTPS should update it in .env after configuring their domain.
+
   info "Building Docker image..."
   "${COMPOSE_CMD[@]}" build chitchat >/dev/null
   ok "Docker image built"
