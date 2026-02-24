@@ -461,7 +461,12 @@ EOF
   "${COMPOSE_CMD[@]}" run --rm --no-deps chitchat node dist/index.js --migrate-only >/dev/null
   ok "Database migration preflight complete"
 
-  if "${COMPOSE_CMD[@]}" run --rm --no-deps chitchat test -f /app/data/config.json >/dev/null 2>&1; then
+  if "${COMPOSE_CMD[@]}" run --rm --no-deps chitchat node -e "
+    try {
+      const c = JSON.parse(require('fs').readFileSync('/app/data/config.json','utf8'));
+      process.exit((c.adminEmails && c.adminEmails.length > 0) ? 0 : 1);
+    } catch(e) { process.exit(1); }
+  " >/dev/null 2>&1; then
     ok "Existing config found, skipping setup"
   else
     if [ "$NON_INTERACTIVE" = "true" ]; then
