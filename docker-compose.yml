@@ -4,7 +4,8 @@ services:
     image: chitchat-server:local
     restart: unless-stopped
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       PORT: 3001
       DB_PATH: /app/data/chitchat.db
@@ -18,12 +19,21 @@ services:
       FILES_AV_CLAMAV_PORT: ${FILES_AV_CLAMAV_PORT:-3310}
       FILES_AV_TIMEOUT_MS: ${FILES_AV_TIMEOUT_MS:-15000}
       FILES_AV_FAIL_CLOSED: ${FILES_AV_FAIL_CLOSED:-true}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     depends_on:
       - livekit
     ports:
       - "${HOST_PORT:-3001}:3001"
     volumes:
       - chitchat_data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   livekit:
     image: livekit/livekit-server:latest
