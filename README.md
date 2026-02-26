@@ -74,6 +74,9 @@ Pre-built images are published to Docker Hub at [`sciphr/chitchat-server`](https
 
 | Variable | Required | Description |
 |---|---|---|
+| `ADMIN_EMAIL` | Yes (first boot only) | Email address for the initial admin account. Ignored after first boot. |
+| `ADMIN_USERNAME` | Yes (first boot only) | Username for the initial admin account. Ignored after first boot. |
+| `ADMIN_PASSWORD` | Yes (first boot only) | Password for the initial admin account (min 10 characters). Used once to create the account, then stored as a bcrypt hash in the database. Can be removed from env vars after first deploy. |
 | `LIVEKIT_API_KEY` | Yes (for voice) | Any string, e.g. `mykey` |
 | `LIVEKIT_API_SECRET` | Yes (for voice) | Random string, minimum 32 characters |
 | `LIVEKIT_URL` | No | Defaults to `ws://livekit:7880` (correct for the bundled container) |
