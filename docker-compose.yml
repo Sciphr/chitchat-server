@@ -1,7 +1,6 @@
 services:
   chitchat:
-    build: .
-    image: chitchat-server:local
+    image: sciphr/chitchat-server:latest
     restart: unless-stopped
     env_file:
       - .env
