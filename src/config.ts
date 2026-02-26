@@ -141,7 +141,7 @@ const DEFAULT_CONFIG: ServerConfig = {
   },
   adminEmails: [],
   livekit: {
-    url: "",
+    url: "ws://livekit:7880",
     apiKey: "",
     apiSecret: "",
     maxScreenShareResolution: "1080p",

@@ -3,15 +3,16 @@ services:
     image: sciphr/chitchat-server:latest
     restart: unless-stopped
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       PORT: 3001
       DB_PATH: /app/data/chitchat.db
       DATA_DIR: /app/data
-      LIVEKIT_URL: ${LIVEKIT_URL:-}
+      LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit:7880}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-}
-      FILES_AV_ENABLED: ${FILES_AV_ENABLED:-false}
+      FILES_AV_ENABLED: ${FILES_AV_ENABLED:-true}
       FILES_AV_PROVIDER: ${FILES_AV_PROVIDER:-clamav}
       FILES_AV_CLAMAV_HOST: ${FILES_AV_CLAMAV_HOST:-clamav}
       FILES_AV_CLAMAV_PORT: ${FILES_AV_CLAMAV_PORT:-3310}
@@ -28,6 +29,8 @@ services:
     image: livekit/livekit-server:latest
     restart: unless-stopped
     command: ["--config", "/etc/livekit.yaml"]
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
     ports:
       - "${LIVEKIT_PORT:-7880}:7880/tcp"
       - "${LIVEKIT_UDP_PORT_START:-50000}-${LIVEKIT_UDP_PORT_END:-50100}:${LIVEKIT_UDP_PORT_START:-50000}-${LIVEKIT_UDP_PORT_END:-50100}/udp"
@@ -37,8 +40,6 @@ services:
   clamav:
     image: clamav/clamav:stable
     restart: unless-stopped
-    profiles:
-      - clamav
     expose:
       - "3310"
     volumes:

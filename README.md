@@ -62,6 +62,33 @@ Example non-interactive Docker install:
 curl -fsSL https://raw.githubusercontent.com/Sciphr/chitchat-server/main/install.sh | sudo bash -s -- --mode docker --non-interactive --admin-email admin@example.com --admin-username admin --admin-password 'change-me-now'
 ```
 
+## Docker Hub / Portainer Install
+
+Pre-built images are published to Docker Hub at [`sciphr/chitchat-server`](https://hub.docker.com/r/sciphr/chitchat-server).
+
+### Portainer (Recommended for Unraid and similar)
+
+1. In Portainer, go to **Stacks → Add stack → Repository**
+2. Set the repository URL to this repo and the compose path to `docker-compose.yml`
+3. Add the following environment variables:
+
+| Variable | Required | Description |
+|---|---|---|
+| `LIVEKIT_API_KEY` | Yes (for voice) | Any string, e.g. `mykey` |
+| `LIVEKIT_API_SECRET` | Yes (for voice) | Random string, minimum 32 characters |
+| `LIVEKIT_URL` | No | Defaults to `ws://livekit:7880` (correct for the bundled container) |
+| `HOST_PORT` | No | Host port to expose the app on. Defaults to `3001` |
+
+> **Important:** `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` must be set before deploying. These are used by both the ChitChat server and the bundled LiveKit container — they must always match. If you ever change them in the Admin UI, you must also update the environment variables in Portainer and restart the stack, otherwise voice will stop working.
+>
+> All other settings (server name, registration, CORS, etc.) can be changed at any time via the Admin UI without restarting.
+
+4. Click **Deploy the stack**
+
+Text chat works immediately. For voice/video, open the required firewall ports:
+- TCP `7880` (LiveKit)
+- UDP `50000–50100` (LiveKit media)
+
 ## Optional: Run With Docker
 
 This is an alternate install/run path. The normal `npm` workflow and Linux installer can still be used.
@@ -78,12 +105,6 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-With ClamAV upload scanning enabled:
-
-```bash
-FILES_AV_ENABLED=true docker compose --profile clamav up -d --build
-```
-
 3. Stop:
 
 ```bash
@@ -98,7 +119,7 @@ Notes:
 - Bundled LiveKit runs in Docker and maps:
   - TCP `${LIVEKIT_PORT:-7880}`
   - UDP `${LIVEKIT_UDP_PORT_START:-50000}` to `${LIVEKIT_UDP_PORT_END:-50100}`
-- When using Docker ClamAV, set `FILES_AV_CLAMAV_HOST=clamav` (already the compose default).
+- ClamAV runs as a bundled sidecar and is enabled by default. Upload scanning is active out of the box.
 - To inspect logs: `docker compose logs -f chitchat`
 
 ## Docker Operations

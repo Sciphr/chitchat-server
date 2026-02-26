@@ -719,6 +719,9 @@
           <label for="cfg-lk-apiSecret">API Secret</label>
           <input type="text" id="cfg-lk-apiSecret" placeholder="secret">
           <div class="field-hint">LiveKit API secret. Shown redacted — enter a new value to change it.</div>
+          <div class="field-hint" style="color: var(--color-warning, #f59e0b); margin-top: 6px;">
+            If running LiveKit via Docker, changing the API key or secret here also requires updating <code>LIVEKIT_API_KEY</code> and <code>LIVEKIT_API_SECRET</code> in your Docker environment and restarting the LiveKit container — otherwise voice will stop working.
+          </div>
         </div>
         <div class="field">
           <label for="cfg-lk-maxScreenRes">Max Screen Share Resolution</label>
