@@ -91,7 +91,7 @@ function getDisposition(mimeType: string) {
     mimeType.startsWith("image/") ||
     mimeType.startsWith("video/") ||
     mimeType.startsWith("audio/") ||
-    mimeType.startsWith("text/") ||
+    mimeType === "text/plain" ||
     mimeType === "application/pdf"
   ) {
     return "inline";

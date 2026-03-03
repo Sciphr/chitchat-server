@@ -50,23 +50,27 @@ export function consumePasswordResetToken(
 ): { userId: string } | null {
   purgeExpiredPasswordResetTokens(db);
   const tokenHash = hashResetToken(token);
+
+  // Atomic check-and-consume: UPDATE only rows that are still unused and
+  // valid, then return the affected user_id via RETURNING.  This prevents a
+  // race where two concurrent requests with the same token could both read
+  // used_at IS NULL before either writes.
   const row = db
     .prepare(
-      `SELECT id, user_id
-       FROM password_resets
-       WHERE token_hash = ?
-         AND used_at IS NULL
-         AND datetime(expires_at) > datetime('now')
-       LIMIT 1`
+      `UPDATE password_resets
+         SET used_at = datetime('now')
+       WHERE id = (
+         SELECT id FROM password_resets
+         WHERE token_hash = ?
+           AND used_at IS NULL
+           AND datetime(expires_at) > datetime('now')
+         LIMIT 1
+       )
+       RETURNING user_id`
     )
-    .get(tokenHash) as { id: string; user_id: string } | undefined;
+    .get(tokenHash) as { user_id: string } | undefined;
 
   if (!row) return null;
-
-  db.prepare(
-    "UPDATE password_resets SET used_at = datetime('now') WHERE id = ?"
-  ).run(row.id);
-
   return { userId: row.user_id };
 }
 
