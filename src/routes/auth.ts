@@ -353,7 +353,8 @@ router.post("/login", (req, res) => {
   const user = db
     .prepare(
       `SELECT id, username, email, password_hash,
-              two_factor_enabled, two_factor_secret
+              two_factor_enabled, two_factor_secret,
+              is_setup_account
        FROM users WHERE email = ?`
     )
     .get(normalizedEmail) as
@@ -364,6 +365,7 @@ router.post("/login", (req, res) => {
         password_hash: string;
         two_factor_enabled: number;
         two_factor_secret: string | null;
+        is_setup_account: number;
       }
     | undefined;
 
@@ -423,10 +425,12 @@ router.post("/login", (req, res) => {
   });
 
   const permissions = getUserPermissions(db, user.id, isAdmin);
+  const isSetupAccount = user.is_setup_account === 1;
 
   res.json({
     token,
     user: { id: user.id, username: user.username, email: user.email, isAdmin, permissions },
+    ...(isSetupAccount && { requiresSetup: true }),
   });
 });
 
@@ -630,6 +634,7 @@ router.get("/me", requireAuth, (req, res) => {
               audio_input_id, video_input_id, audio_output_id,
               video_background_mode, video_background_image_url,
               two_factor_enabled,
+              is_setup_account,
               created_at, updated_at
        FROM users WHERE id = ?`
     )
@@ -640,7 +645,9 @@ router.get("/me", requireAuth, (req, res) => {
     return;
   }
   const permissions = getUserPermissions(db, userId, isAdmin);
-  res.json({ ...profile, isAdmin, permissions });
+  const isSetupAccount = profile.is_setup_account === 1;
+  const { is_setup_account: _, ...profileWithout } = profile;
+  res.json({ ...profileWithout, isAdmin, permissions, ...(isSetupAccount && { requiresSetup: true }) });
 });
 
 // GET /api/auth/2fa/status

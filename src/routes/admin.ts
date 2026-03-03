@@ -2,13 +2,14 @@ import express, { Router } from "express";
 import type { Request } from "express";
 import crypto from "crypto";
 import path from "path";
+import bcrypt from "bcryptjs";
 import {
   getConfig,
   getRedactedConfig,
   updateConfig,
   type ServerConfig,
 } from "../config.js";
-import { requireAuth, requireAdmin } from "../middleware/auth.js";
+import { requireAuth, requireAdmin, generateToken } from "../middleware/auth.js";
 import { getDb } from "../db/database.js";
 import { broadcastRoomStructure } from "../websocket/handler.js";
 import {
@@ -26,6 +27,7 @@ import {
   migrateAttachmentStorageRoot,
   restoreEncryptedDatabaseBackup,
 } from "../services/backup.js";
+import { getUserPermissions } from "../permissions.js";
 
 const router = Router();
 
@@ -56,6 +58,116 @@ function ensureDefaultRole() {
     ) VALUES ('everyone', '@everyone', '#94a3b8', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1)`
   ).run();
 }
+
+// GET /api/admin/setup-status — check if the server still has the default setup account
+router.get("/setup-status", requireAuth, requireAdmin, (_req, res) => {
+  const db = getDb();
+  const setupAccount = db
+    .prepare("SELECT id FROM users WHERE is_setup_account = 1")
+    .get() as { id: string } | undefined;
+  res.json({ requiresSetup: Boolean(setupAccount) });
+});
+
+// POST /api/admin/complete-setup — replace the default setup account with a real admin
+router.post("/complete-setup", requireAuth, requireAdmin, (req, res) => {
+  const config = getConfig();
+  const db = getDb();
+  const { userId } = (req as any).user;
+
+  // Verify the current user IS the setup account
+  const setupUser = db
+    .prepare("SELECT id, email FROM users WHERE id = ? AND is_setup_account = 1")
+    .get(userId) as { id: string; email: string } | undefined;
+
+  if (!setupUser) {
+    res.status(403).json({ error: "Setup has already been completed" });
+    return;
+  }
+
+  const { username, email, password } = req.body;
+
+  if (
+    typeof username !== "string" ||
+    typeof email !== "string" ||
+    typeof password !== "string"
+  ) {
+    res.status(400).json({ error: "Missing required fields: username, email, password" });
+    return;
+  }
+
+  const trimmedUsername = username.trim();
+  const trimmedEmail = email.trim().toLowerCase();
+  const USERNAME_PATTERN = /^[a-zA-Z0-9._-]{2,32}$/;
+
+  if (!USERNAME_PATTERN.test(trimmedUsername)) {
+    res.status(400).json({
+      error: "Username must be 2-32 characters and use only letters, numbers, '.', '_' or '-'",
+    });
+    return;
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+    res.status(400).json({ error: "Invalid email address" });
+    return;
+  }
+
+  if (password.length < config.registration.minPasswordLength) {
+    res.status(400).json({
+      error: `Password must be at least ${config.registration.minPasswordLength} characters`,
+    });
+    return;
+  }
+
+  // Check if the new email or username conflicts with another existing user
+  const conflict = db
+    .prepare("SELECT id FROM users WHERE (email = ? OR username = ?) AND id != ?")
+    .get(trimmedEmail, trimmedUsername, setupUser.id) as { id: string } | undefined;
+
+  if (conflict) {
+    res.status(400).json({ error: "Email or username already taken" });
+    return;
+  }
+
+  // Create the new admin user
+  const newUserId = crypto.randomUUID();
+  const passwordHash = bcrypt.hashSync(password, config.bcryptRounds);
+
+  db.prepare(
+    "INSERT INTO users (id, username, email, password_hash, status, is_setup_account) VALUES (?, ?, ?, ?, 'online', 0)"
+  ).run(newUserId, trimmedUsername, trimmedEmail, passwordHash);
+
+  // Update config.json to replace the old admin email with the new one
+  const oldEmail = setupUser.email.toLowerCase();
+  const updatedAdminEmails = config.adminEmails
+    .filter((e) => e.trim().toLowerCase() !== oldEmail)
+    .concat(trimmedEmail);
+
+  updateConfig({ adminEmails: updatedAdminEmails });
+
+  // Delete the default setup account
+  db.prepare("DELETE FROM users WHERE id = ?").run(setupUser.id);
+
+  // Generate a new token for the new admin
+  const token = generateToken({
+    userId: newUserId,
+    username: trimmedUsername,
+    email: trimmedEmail,
+    isAdmin: true,
+  });
+
+  const permissions = getUserPermissions(db, newUserId, true);
+
+  res.json({
+    token,
+    user: {
+      id: newUserId,
+      username: trimmedUsername,
+      email: trimmedEmail,
+      isAdmin: true,
+      permissions,
+    },
+  });
+});
 
 // GET /api/admin/config — return redacted config
 router.get("/config", requireAuth, requireAdmin, (_req, res) => {

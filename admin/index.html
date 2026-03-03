@@ -498,6 +498,33 @@
   </div>
 </div>
 
+<!-- Setup Wizard (shown after first login with default admin) -->
+<div id="setup-screen" class="login-wrapper hidden">
+  <div class="login-box" style="width: 440px;">
+    <h1>Create Your Admin Account</h1>
+    <p>You're using the default setup account. Create your permanent admin account below. The default account will be removed.</p>
+    <div class="field">
+      <label for="setup-username">Username</label>
+      <input type="text" id="setup-username" placeholder="your-username" autocomplete="username">
+    </div>
+    <div class="field">
+      <label for="setup-email">Email</label>
+      <input type="email" id="setup-email" placeholder="you@example.com" autocomplete="email">
+    </div>
+    <div class="field">
+      <label for="setup-password">Password</label>
+      <input type="password" id="setup-password" placeholder="Min. 10 characters" autocomplete="new-password">
+    </div>
+    <div class="field">
+      <label for="setup-password-confirm">Confirm Password</label>
+      <input type="password" id="setup-password-confirm" placeholder="Confirm password" autocomplete="new-password">
+    </div>
+    <div id="setup-error" class="error-msg hidden"></div>
+    <br>
+    <button class="btn btn-primary btn-full" id="setup-btn">Create Account</button>
+  </div>
+</div>
+
 <!-- Main App Shell -->
 <div id="app-shell" class="shell hidden">
   <aside class="sidebar">
@@ -1390,12 +1417,60 @@
       token = data.token;
       currentUser = data.user;
       localStorage.setItem('chitchat_admin_token', token);
-      showApp();
+
+      if (data.requiresSetup) {
+        showSetupWizard();
+      } else {
+        showApp();
+      }
     } catch (err) {
       $('#login-error').textContent = err.message;
       $('#login-error').classList.remove('hidden');
     } finally {
       $('#login-btn').disabled = false;
+    }
+  }
+
+  function showSetupWizard() {
+    $('#login-screen').classList.add('hidden');
+    $('#app-shell').classList.add('hidden');
+    $('#setup-screen').classList.remove('hidden');
+  }
+
+  async function completeSetup() {
+    const username = $('#setup-username').value.trim();
+    const email = $('#setup-email').value.trim();
+    const password = $('#setup-password').value;
+    const confirm = $('#setup-password-confirm').value;
+
+    $('#setup-error').classList.add('hidden');
+
+    if (!username || !email || !password) {
+      $('#setup-error').textContent = 'All fields are required';
+      $('#setup-error').classList.remove('hidden');
+      return;
+    }
+
+    if (password !== confirm) {
+      $('#setup-error').textContent = 'Passwords do not match';
+      $('#setup-error').classList.remove('hidden');
+      return;
+    }
+
+    $('#setup-btn').disabled = true;
+
+    try {
+      const data = await api('POST', '/api/admin/complete-setup', { username, email, password });
+      token = data.token;
+      currentUser = data.user;
+      localStorage.setItem('chitchat_admin_token', token);
+      $('#setup-screen').classList.add('hidden');
+      showApp();
+    } catch (err) {
+      $('#setup-error').textContent = err.message;
+      $('#setup-error').classList.remove('hidden');
+    } finally {
+      $('#setup-btn').disabled = false;
     }
   }
 
@@ -1408,6 +1483,7 @@
     currentUser = null;
     localStorage.removeItem('chitchat_admin_token');
     $('#app-shell').classList.add('hidden');
+    $('#setup-screen').classList.add('hidden');
     $('#login-screen').classList.remove('hidden');
     $('#login-password').value = '';
   }
@@ -1418,12 +1494,18 @@
       const me = await api('GET', '/api/auth/me');
       if (!me.isAdmin) throw new Error('Not admin');
       currentUser = me;
+      // If still a setup account, show the wizard instead
+      if (me.requiresSetup) {
+        showSetupWizard();
+        return;
+      }
     } catch {
       logout();
       return;
     }
 
     $('#login-screen').classList.add('hidden');
+    $('#setup-screen').classList.add('hidden');
     $('#app-shell').classList.remove('hidden');
     $('#admin-username').textContent = currentUser.username;
 
@@ -2434,6 +2516,8 @@
   $('#login-btn').addEventListener('click', attemptLogin);
   $('#login-password').addEventListener('keydown', e => { if (e.key === 'Enter') attemptLogin(); });
   $('#login-email').addEventListener('keydown', e => { if (e.key === 'Enter') $('#login-password').focus(); });
+  $('#setup-btn').addEventListener('click', completeSetup);
+  $('#setup-password-confirm').addEventListener('keydown', e => { if (e.key === 'Enter') completeSetup(); });
   $('#logout-btn').addEventListener('click', logout);
   $('#save-config-btn').addEventListener('click', saveConfig);
   $('#cfg-files-av-enabled').addEventListener('change', updateFilesAvFieldsVisibility);
