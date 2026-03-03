@@ -5,7 +5,7 @@ import express, { Router } from "express";
 import { getConfig } from "../config.js";
 import { getDb } from "../db/database.js";
 import { requireAuth } from "../middleware/auth.js";
-import { getUserModerationState, getUserPermissions } from "../permissions.js";
+import { getUserModerationState, getUserPermissions, canAccessRoom } from "../permissions.js";
 import { scanUploadForMalware } from "../services/antivirus.js";
 
 const router = Router();
@@ -450,7 +450,22 @@ router.post("/link", requireAuth, (req, res) => {
 // GET /api/files/message/:messageId
 // List attachments for a message.
 router.get("/message/:messageId", requireAuth, (req, res) => {
+  const user = (req as any).user as { userId: string; isAdmin: boolean };
   const db = getDb();
+
+  // Verify user has access to the room this message belongs to
+  const message = db
+    .prepare("SELECT room_id FROM messages WHERE id = ?")
+    .get(req.params.messageId) as { room_id: string } | undefined;
+  if (!message) {
+    res.status(404).json({ error: "Message not found" });
+    return;
+  }
+  if (!canAccessRoom(db, message.room_id, user.userId, Boolean(user.isAdmin))) {
+    res.status(403).json({ error: "Not authorized to access this message" });
+    return;
+  }
+
   const rows = db
     .prepare(
       `SELECT a.id, a.original_name, a.mime_type, a.size_bytes, a.created_at
@@ -482,6 +497,7 @@ router.get("/message/:messageId", requireAuth, (req, res) => {
 // GET /api/files/:id
 // Authenticated file read/preview endpoint.
 router.get("/:id", requireAuth, (req, res) => {
+  const user = (req as any).user as { userId: string; isAdmin: boolean };
   const db = getDb();
   const row = db
     .prepare(
@@ -500,6 +516,21 @@ router.get("/:id", requireAuth, (req, res) => {
 
   if (!row) {
     res.status(404).json({ error: "File not found" });
+    return;
+  }
+
+  // Verify user has access to the room this file belongs to
+  const link = db
+    .prepare(
+      `SELECT m.room_id
+       FROM message_attachments ma
+       JOIN messages m ON m.id = ma.message_id
+       WHERE ma.attachment_id = ?
+       LIMIT 1`,
+    )
+    .get(req.params.id) as { room_id: string } | undefined;
+  if (link && !canAccessRoom(db, link.room_id, user.userId, Boolean(user.isAdmin))) {
+    res.status(403).json({ error: "Not authorized to access this file" });
     return;
   }
 

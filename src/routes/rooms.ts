@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { getDb } from "../db/database.js";
 import { getConfig } from "../config.js";
 import { requireAuth } from "../middleware/auth.js";
+import { canAccessRoom } from "../permissions.js";
 
 const router = Router();
 const MAX_ROOM_NAME_LENGTH = 50;
@@ -10,10 +11,14 @@ const ROOM_NAME_PATTERN = /^[a-zA-Z0-9 _-]+$/;
 const ALLOWED_ROOM_TYPES = new Set(["text", "voice"]);
 
 // GET /api/rooms
-router.get("/", requireAuth, (_req, res) => {
+router.get("/", requireAuth, (req, res) => {
+  const user = (req as any).user as { userId: string; isAdmin: boolean };
   const db = getDb();
-  const rooms = db.prepare("SELECT * FROM rooms ORDER BY created_at ASC").all();
-  res.json(rooms);
+  const rooms = db.prepare("SELECT * FROM rooms ORDER BY created_at ASC").all() as Array<{ id: string; [key: string]: unknown }>;
+  const accessible = rooms.filter((room) =>
+    canAccessRoom(db, room.id, user.userId, Boolean(user.isAdmin))
+  );
+  res.json(accessible);
 });
 
 // POST /api/rooms
