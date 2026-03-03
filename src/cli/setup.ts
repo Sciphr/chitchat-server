@@ -15,7 +15,12 @@ const GREEN = "\x1b[32m";
 const CYAN = "\x1b[36m";
 const YELLOW = "\x1b[33m";
 const MAGENTA = "\x1b[35m";
-const DEFAULT_MIN_PASSWORD_LENGTH = 10;
+
+// ─── Default setup account credentials ──────────────────────────────
+
+export const DEFAULT_ADMIN_EMAIL = "admin@chitchat.local";
+export const DEFAULT_ADMIN_USERNAME = "admin";
+export const DEFAULT_ADMIN_PASSWORD = "changeme123!";
 
 function printBanner() {
   console.log();
@@ -23,7 +28,7 @@ function printBanner() {
   console.log(`${MAGENTA}${BOLD}  ║       ChitChat Server Setup          ║${RESET}`);
   console.log(`${MAGENTA}${BOLD}  ╚══════════════════════════════════════╝${RESET}`);
   console.log();
-  console.log(`${DIM}  No admin account found. Let's set up your server.${RESET}`);
+  console.log(`${DIM}  Setting up your server with a default admin account.${RESET}`);
   console.log();
 }
 
@@ -36,50 +41,6 @@ function ask(rl: readline.Interface, question: string, defaultValue?: string): P
     rl.question(prompt, (answer) => {
       resolve(answer.trim() || defaultValue || "");
     });
-  });
-}
-
-function askPassword(rl: readline.Interface, question: string): Promise<string> {
-  return new Promise((resolve) => {
-    const prompt = `${CYAN}  ${question}${RESET}: `;
-    process.stdout.write(prompt);
-
-    const stdin = process.stdin;
-    const wasRaw = stdin.isRaw;
-
-    if (stdin.isTTY) {
-      stdin.setRawMode(true);
-    }
-
-    let password = "";
-
-    const onData = (ch: Buffer) => {
-      const c = ch.toString("utf8");
-
-      if (c === "\n" || c === "\r" || c === "\u0004") {
-        // Enter or Ctrl-D
-        if (stdin.isTTY) stdin.setRawMode(wasRaw ?? false);
-        stdin.removeListener("data", onData);
-        process.stdout.write("\n");
-        resolve(password);
-      } else if (c === "\u0003") {
-        // Ctrl-C
-        if (stdin.isTTY) stdin.setRawMode(wasRaw ?? false);
-        process.exit(0);
-      } else if (c === "\u007f" || c === "\b") {
-        // Backspace
-        if (password.length > 0) {
-          password = password.slice(0, -1);
-          process.stdout.write("\b \b");
-        }
-      } else {
-        password += c;
-        process.stdout.write("*");
-      }
-    };
-
-    stdin.resume();
-    stdin.on("data", onData);
   });
 }
 
@@ -116,45 +77,8 @@ export function needsSetup(): boolean {
 interface SetupFlags {
   serverName?: string;
   port?: string;
-  adminEmail?: string;
-  adminUsername?: string;
-  adminPassword?: string;
   storagePath?: string;
   dataDir?: string;
-}
-
-function resolveMinPasswordLength(dataDir: string): number {
-  let minPasswordLength = DEFAULT_MIN_PASSWORD_LENGTH;
-
-  const configPath = path.join(path.resolve(dataDir), "config.json");
-  if (fs.existsSync(configPath)) {
-    try {
-      const existing = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-      const configured = existing?.registration?.minPasswordLength;
-      if (Number.isInteger(configured)) {
-        minPasswordLength = configured;
-      }
-    } catch {
-      // Ignore parse/read errors and keep defaults
-    }
-  }
-
-  if (process.env.REGISTRATION_MIN_PASSWORD_LENGTH) {
-    const envValue = parseInt(process.env.REGISTRATION_MIN_PASSWORD_LENGTH, 10);
-    if (!Number.isNaN(envValue)) {
-      minPasswordLength = envValue;
-    }
-  }
-
-  if (
-    !Number.isInteger(minPasswordLength) ||
-    minPasswordLength < 6 ||
-    minPasswordLength > 128
-  ) {
-    return DEFAULT_MIN_PASSWORD_LENGTH;
-  }
-
-  return minPasswordLength;
 }
 
 export function parseSetupFlags(args: string[]): SetupFlags | null {
@@ -167,17 +91,11 @@ export function parseSetupFlags(args: string[]): SetupFlags | null {
 
     if (arg === "--server-name" && next) { flags.serverName = next; hasFlags = true; i++; }
     else if (arg === "--port" && next) { flags.port = next; hasFlags = true; i++; }
-    else if (arg === "--admin-email" && next) { flags.adminEmail = next; hasFlags = true; i++; }
-    else if (arg === "--admin-username" && next) { flags.adminUsername = next; hasFlags = true; i++; }
-    else if (arg === "--admin-password" && next) { flags.adminPassword = next; hasFlags = true; i++; }
     else if (arg === "--storage-path" && next) { flags.storagePath = next; hasFlags = true; i++; }
     else if (arg === "--data-dir" && next) { flags.dataDir = next; hasFlags = true; i++; }
   }
 
   // Also check env vars (for Docker)
-  if (process.env.ADMIN_EMAIL) { flags.adminEmail = process.env.ADMIN_EMAIL; hasFlags = true; }
-  if (process.env.ADMIN_USERNAME) { flags.adminUsername = process.env.ADMIN_USERNAME; hasFlags = true; }
-  if (process.env.ADMIN_PASSWORD) { flags.adminPassword = process.env.ADMIN_PASSWORD; hasFlags = true; }
   if (process.env.SERVER_NAME) { flags.serverName = process.env.SERVER_NAME; hasFlags = true; }
   if (process.env.STORAGE_PATH) { flags.storagePath = process.env.STORAGE_PATH; hasFlags = true; }
   if (process.env.DATA_DIR) { flags.dataDir = process.env.DATA_DIR; hasFlags = true; }
@@ -190,9 +108,6 @@ export function parseSetupFlags(args: string[]): SetupFlags | null {
 export async function runSetup(flags?: SetupFlags | null): Promise<void> {
   let serverName: string;
   let port: number;
-  let adminEmail: string;
-  let adminUsername: string;
-  let adminPassword: string;
   let storagePath: string;
   let dataDir: string;
 
@@ -200,24 +115,13 @@ export async function runSetup(flags?: SetupFlags | null): Promise<void> {
     ? path.resolve(process.env.DATA_DIR)
     : process.cwd();
   const defaultStoragePath = path.join(defaultDataDir, "uploads");
-  const defaultMinPasswordLength = resolveMinPasswordLength(defaultDataDir);
 
-  if (flags?.adminEmail && flags?.adminUsername && flags?.adminPassword) {
+  if (flags?.serverName || flags?.port || flags?.storagePath || flags?.dataDir) {
     // Non-interactive mode (flags or env vars)
     serverName = flags.serverName || "My ChitChat Server";
     port = flags.port ? parseInt(flags.port, 10) : (process.env.PORT ? parseInt(process.env.PORT, 10) : 3001);
-    adminEmail = flags.adminEmail;
-    adminUsername = flags.adminUsername;
-    adminPassword = flags.adminPassword;
     storagePath = flags.storagePath || defaultStoragePath;
     dataDir = flags.dataDir ? path.resolve(flags.dataDir) : defaultDataDir;
-
-    const minPasswordLength = resolveMinPasswordLength(dataDir);
-    if (adminPassword.length < minPasswordLength) {
-      throw new Error(
-        `Admin password must be at least ${minPasswordLength} characters (set by registration.minPasswordLength)`
-      );
-    }
 
     console.log();
     console.log(`${GREEN}  ✓${RESET} Running automated setup...`);
@@ -237,29 +141,6 @@ export async function runSetup(flags?: SetupFlags | null): Promise<void> {
       } else {
         const portStr = await ask(rl, "Port", "3001");
         port = parseInt(portStr, 10) || 3001;
-      }
-
-      console.log();
-      console.log(`${YELLOW}  Admin Account${RESET}`);
-
-      adminEmail = await ask(rl, "Admin email");
-      while (!adminEmail || !adminEmail.includes("@")) {
-        console.log(`${DIM}  Please enter a valid email address.${RESET}`);
-        adminEmail = await ask(rl, "Admin email");
-      }
-
-      adminUsername = await ask(rl, "Admin username");
-      while (!adminUsername) {
-        console.log(`${DIM}  Username is required.${RESET}`);
-        adminUsername = await ask(rl, "Admin username");
-      }
-
-      adminPassword = await askPassword(rl, "Admin password");
-      while (adminPassword.length < defaultMinPasswordLength) {
-        console.log(
-          `${DIM}  Password must be at least ${defaultMinPasswordLength} characters.${RESET}`
-        );
-        adminPassword = await askPassword(rl, "Admin password");
       }
 
       console.log();
@@ -295,7 +176,7 @@ export async function runSetup(flags?: SetupFlags | null): Promise<void> {
     serverName,
     port,
     jwtSecret: existingConfig.jwtSecret || crypto.randomBytes(32).toString("hex"),
-    adminEmails: [adminEmail],
+    adminEmails: [DEFAULT_ADMIN_EMAIL],
     dbPath: existingConfig.dbPath || path.join(dataDir, "chitchat.db"),
     files: {
       ...(existingConfig.files || {}),
@@ -305,7 +186,7 @@ export async function runSetup(flags?: SetupFlags | null): Promise<void> {
     registration: {
       ...(existingConfig.registration || {}),
       minPasswordLength:
-        existingConfig.registration?.minPasswordLength ?? defaultMinPasswordLength,
+        existingConfig.registration?.minPasswordLength ?? 10,
     },
   };
 
@@ -315,21 +196,21 @@ export async function runSetup(flags?: SetupFlags | null): Promise<void> {
   loadConfig();
   const config = getConfig();
 
-  // Create admin user in the database
+  // Create the default setup admin account in the database
   const db = getDb();
   const existing = db
     .prepare("SELECT id FROM users WHERE email = ?")
-    .get(adminEmail) as { id: string } | undefined;
+    .get(DEFAULT_ADMIN_EMAIL) as { id: string } | undefined;
 
   if (!existing) {
     const id = crypto.randomUUID();
-    const passwordHash = bcrypt.hashSync(adminPassword, config.bcryptRounds);
+    const passwordHash = bcrypt.hashSync(DEFAULT_ADMIN_PASSWORD, config.bcryptRounds);
 
     db.prepare(
-      "INSERT INTO users (id, username, email, password_hash, status) VALUES (?, ?, ?, ?, 'online')"
-    ).run(id, adminUsername, adminEmail, passwordHash);
+      "INSERT INTO users (id, username, email, password_hash, status, is_setup_account) VALUES (?, ?, ?, ?, 'online', 1)"
+    ).run(id, DEFAULT_ADMIN_USERNAME, DEFAULT_ADMIN_EMAIL, passwordHash);
 
-    console.log(`${GREEN}  ✓${RESET} Admin account created (${adminEmail})`);
+    console.log(`${GREEN}  ✓${RESET} Default admin account created`);
   } else {
     console.log(`${DIM}  Admin account already exists, skipping.${RESET}`);
   }
@@ -337,5 +218,13 @@ export async function runSetup(flags?: SetupFlags | null): Promise<void> {
   console.log(`${GREEN}  ✓${RESET} Config saved to ${configPath}`);
   console.log(`${GREEN}  ✓${RESET} Storage directory: ${resolvedStorage}`);
   console.log(`${GREEN}  ✓${RESET} Server will run on port ${port}`);
+  console.log();
+  console.log(`${YELLOW}  ┌──────────────────────────────────────────────────────────┐${RESET}`);
+  console.log(`${YELLOW}  │${RESET}  ${BOLD}Default admin login:${RESET}                                    ${YELLOW}│${RESET}`);
+  console.log(`${YELLOW}  │${RESET}    Email:    ${CYAN}${DEFAULT_ADMIN_EMAIL}${RESET}                  ${YELLOW}│${RESET}`);
+  console.log(`${YELLOW}  │${RESET}    Password: ${CYAN}${DEFAULT_ADMIN_PASSWORD}${RESET}                          ${YELLOW}│${RESET}`);
+  console.log(`${YELLOW}  │${RESET}                                                          ${YELLOW}│${RESET}`);
+  console.log(`${YELLOW}  │${RESET}  ${DIM}Go to /admin to create your real admin account.${RESET}         ${YELLOW}│${RESET}`);
+  console.log(`${YELLOW}  └──────────────────────────────────────────────────────────┘${RESET}`);
   console.log();
 }

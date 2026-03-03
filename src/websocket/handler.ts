@@ -7,6 +7,11 @@ import {
   getUserModerationState,
   getUserPermissionOverrides,
   getUserPermissions,
+  ensureDefaultRole,
+  getUserRoleIds,
+  hasCustomRoomPermissions,
+  hasRoomPermissionByRole,
+  canAccessRoom,
   type PermissionKey,
   type PermissionSet,
   PERMISSION_KEYS,
@@ -337,17 +342,6 @@ function withReactions(db: ReturnType<typeof getDb>, rows: MessageRow[]) {
   });
 }
 
-function ensureDefaultRole(db: ReturnType<typeof getDb>) {
-  db.prepare(
-    `INSERT OR IGNORE INTO roles (
-      id, name, color, position, can_manage_channels, can_manage_roles, can_manage_server,
-      can_kick_members, can_ban_members, can_timeout_members, can_moderate_voice,
-      can_pin_messages, can_manage_messages, can_upload_files, can_use_emojis, can_start_voice,
-      is_system
-    ) VALUES ('everyone', '@everyone', '#94a3b8', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1)`
-  ).run();
-}
-
 function withReplyMeta(db: ReturnType<typeof getDb>, rows: MessageRow[]) {
   if (!rows.length) return rows;
 
@@ -400,63 +394,6 @@ function getUserManagementPermissions(
   return getUserPermissions(db, userId, isAdmin);
 }
 
-function getUserRoleIds(db: ReturnType<typeof getDb>, userId: string): string[] {
-  ensureDefaultRole(db);
-  const rows = db
-    .prepare("SELECT role_id FROM user_roles WHERE user_id = ?")
-    .all(userId) as Array<{ role_id: string }>;
-  const ids = new Set<string>(["everyone"]);
-  for (const row of rows) ids.add(row.role_id);
-  return Array.from(ids);
-}
-
-function hasCustomRoomPermissions(db: ReturnType<typeof getDb>, roomId: string): boolean {
-  const row = db
-    .prepare("SELECT 1 as ok FROM room_role_permissions WHERE room_id = ? LIMIT 1")
-    .get(roomId) as { ok: number } | undefined;
-  return Boolean(row?.ok);
-}
-
-function hasRoomPermissionByRole(
-  db: ReturnType<typeof getDb>,
-  roomId: string,
-  userId: string,
-  permission: "allow_view" | "allow_send" | "allow_connect"
-): boolean {
-  if (!hasCustomRoomPermissions(db, roomId)) return true;
-  const userRoleIds = getUserRoleIds(db, userId);
-  if (!userRoleIds.length) return false;
-  const placeholders = userRoleIds.map(() => "?").join(", ");
-  const row = db
-    .prepare(
-      `SELECT 1 as ok
-       FROM room_role_permissions
-       WHERE room_id = ? AND role_id IN (${placeholders}) AND ${permission} = 1
-       LIMIT 1`
-    )
-    .get(roomId, ...userRoleIds) as { ok: number } | undefined;
-  return Boolean(row?.ok);
-}
-
-function canAccessRoom(
-  db: ReturnType<typeof getDb>,
-  roomId: string,
-  userId: string,
-  isAdmin = false
-): boolean {
-  if (isAdmin) return true;
-  const room = db
-    .prepare("SELECT type, is_temporary FROM rooms WHERE id = ?")
-    .get(roomId) as { type: "text" | "voice" | "dm"; is_temporary: number } | undefined;
-  if (!room) return false;
-  if (room.type !== "dm" && room.is_temporary !== 1) {
-    return hasRoomPermissionByRole(db, roomId, userId, "allow_view");
-  }
-  const membership = db
-    .prepare("SELECT 1 FROM room_members WHERE room_id = ? AND user_id = ?")
-    .get(roomId, userId);
-  return Boolean(membership);
-}
 
 function canSendRoomMessage(
   db: ReturnType<typeof getDb>,

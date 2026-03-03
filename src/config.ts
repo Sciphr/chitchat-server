@@ -176,7 +176,7 @@ const DEFAULT_CONFIG: ServerConfig = {
   },
   cors: {
     allowedOrigins: ["*"],
-    allowNoOrigin: true,
+    allowNoOrigin: false,
   },
 };
 

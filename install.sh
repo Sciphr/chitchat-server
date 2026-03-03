@@ -53,16 +53,16 @@ Usage:
 
 Options:
   --mode <native|docker>       Installation mode (default: prompt in interactive shell)
-  --non-interactive            Run first-time setup without prompts (requires admin flags)
-  --admin-email <email>        Admin email for first-time setup
-  --admin-username <username>  Admin username for first-time setup
-  --admin-password <password>  Admin password for first-time setup
+  --non-interactive            Run first-time setup without prompts
   --server-name <name>         Server name for first-time setup
   --data-dir <path>            Override persistent data directory (default: /var/lib/chitchat)
   --docker-port <port>         Host port for Docker mode (default: 3001)
   --with-clamav                Force install/configure ClamAV upload scanning
   --skip-clamav                Do not install/configure ClamAV upload scanning
   --help                       Show this help
+
+A default admin account is created automatically during setup.
+Log in at /admin to replace it with your real admin account.
 USAGE
 }
 
@@ -124,9 +124,6 @@ VERSION="latest"
 INSTALL_MODE="native"
 MODE_EXPLICIT=false
 NON_INTERACTIVE=false
-SETUP_ADMIN_EMAIL=""
-SETUP_ADMIN_USERNAME=""
-SETUP_ADMIN_PASSWORD=""
 SETUP_SERVER_NAME=""
 DOCKER_HOST_PORT=3001
 
@@ -153,20 +150,9 @@ while [ "$#" -gt 0 ]; do
       esac
       shift 2
       ;;
-    --admin-email)
-      [ $# -ge 2 ] || fail "--admin-email requires a value"
-      SETUP_ADMIN_EMAIL="$2"
-      shift 2
-      ;;
-    --admin-username)
-      [ $# -ge 2 ] || fail "--admin-username requires a value"
-      SETUP_ADMIN_USERNAME="$2"
-      shift 2
-      ;;
-    --admin-password)
-      [ $# -ge 2 ] || fail "--admin-password requires a value"
-      SETUP_ADMIN_PASSWORD="$2"
-      shift 2
+    --admin-email|--admin-username|--admin-password)
+      warn "$1 is deprecated and ignored. Admin account is now created automatically."
+      [ $# -ge 2 ] && shift 2 || shift
       ;;
     --server-name)
       [ $# -ge 2 ] || fail "--server-name requires a value"
@@ -489,25 +475,15 @@ EOF
   " >/dev/null 2>&1; then
     ok "Existing config found, skipping setup"
   else
+    info "Running first-time setup..."
+    setup_args=(--setup)
+    if [ -n "$SETUP_SERVER_NAME" ]; then
+      setup_args+=(--server-name "$SETUP_SERVER_NAME")
+    fi
     if [ "$NON_INTERACTIVE" = "true" ]; then
-      [ -n "$SETUP_ADMIN_EMAIL" ] || fail "Missing --admin-email for --non-interactive first install"
-      [ -n "$SETUP_ADMIN_USERNAME" ] || fail "Missing --admin-username for --non-interactive first install"
-      [ -n "$SETUP_ADMIN_PASSWORD" ] || fail "Missing --admin-password for --non-interactive first install"
-
-      info "Running first-time setup (non-interactive)..."
-      setup_args=(
-        --setup
-        --admin-email "$SETUP_ADMIN_EMAIL"
-        --admin-username "$SETUP_ADMIN_USERNAME"
-        --admin-password "$SETUP_ADMIN_PASSWORD"
-      )
-      if [ -n "$SETUP_SERVER_NAME" ]; then
-        setup_args+=(--server-name "$SETUP_SERVER_NAME")
-      fi
       "${COMPOSE_CMD[@]}" run --rm --no-deps chitchat node dist/index.js "${setup_args[@]}"
     else
-      info "Running first-time setup..."
-      "${COMPOSE_CMD[@]}" run --rm --no-deps chitchat node dist/index.js --setup </dev/tty
+      "${COMPOSE_CMD[@]}" run --rm --no-deps chitchat node dist/index.js "${setup_args[@]}" </dev/tty
     fi
   fi
 
@@ -537,6 +513,11 @@ EOF
   echo -e "  ${CYAN}http://127.0.0.1:${DOCKER_HOST_PORT}${RESET}"
   echo -e "  ${BOLD}LiveKit (voice/video):${RESET}"
   echo -e "  ${CYAN}ws://${SERVER_IP}:${LIVEKIT_PORT}${RESET}"
+  echo ""
+  echo -e "  ${YELLOW}${BOLD}  Default admin login:${RESET}"
+  echo -e "    Email:    ${CYAN}admin@chitchat.local${RESET}"
+  echo -e "    Password: ${CYAN}changeme123!${RESET}"
+  echo -e "    ${DIM}Go to http://127.0.0.1:${DOCKER_HOST_PORT}/admin to create your real admin account.${RESET}"
   echo ""
   echo -e "  ${DIM}Useful commands:${RESET}"
   echo -e "  ${DIM}  Status:   cd ${APP_DIR} && ${COMPOSE_CMD[*]} ps${RESET}"
@@ -1005,31 +986,20 @@ ok "Database migration preflight complete"
 if [ "${CONFIG_EXISTED}" = "true" ]; then
   ok "Existing config found, skipping setup"
 else
+  info "Running first-time setup..."
+  setup_args=(--setup)
+  if [ -n "$SETUP_SERVER_NAME" ]; then
+    setup_args+=(--server-name "$SETUP_SERVER_NAME")
+  fi
+
   if [ "$NON_INTERACTIVE" = "true" ]; then
-    [ -n "$SETUP_ADMIN_EMAIL" ] || fail "Missing --admin-email for --non-interactive first install"
-    [ -n "$SETUP_ADMIN_USERNAME" ] || fail "Missing --admin-username for --non-interactive first install"
-    [ -n "$SETUP_ADMIN_PASSWORD" ] || fail "Missing --admin-password for --non-interactive first install"
-
-    info "Running first-time setup (non-interactive)..."
-    setup_args=(
-      --setup
-      --admin-email "$SETUP_ADMIN_EMAIL"
-      --admin-username "$SETUP_ADMIN_USERNAME"
-      --admin-password "$SETUP_ADMIN_PASSWORD"
-    )
-    if [ -n "$SETUP_SERVER_NAME" ]; then
-      setup_args+=(--server-name "$SETUP_SERVER_NAME")
-    fi
-
     sudo -u "$SERVICE_USER" env DATA_DIR="$DATA_DIR" node "${APP_DIR}/dist/index.js" "${setup_args[@]}"
   else
-    info "Running first-time setup..."
     echo ""
-
     # Run setup interactively as the chitchat user
     # Note: </dev/tty is required when running via curl|bash so stdin reads from the terminal
     cd "$DATA_DIR"
-    sudo -u "$SERVICE_USER" env DATA_DIR="$DATA_DIR" node "${APP_DIR}/dist/index.js" --setup </dev/tty
+    sudo -u "$SERVICE_USER" env DATA_DIR="$DATA_DIR" node "${APP_DIR}/dist/index.js" "${setup_args[@]}" </dev/tty
   fi
 fi
 
@@ -1160,6 +1130,11 @@ echo -e "  ${CYAN}http://${SERVER_IP}:${PORT}${RESET}"
 echo ""
 echo -e "  ${BOLD}LiveKit (voice/video):${RESET}"
 echo -e "  ${CYAN}${LK_WS_URL}${RESET}"
+echo ""
+echo -e "  ${YELLOW}${BOLD}  Default admin login:${RESET}"
+echo -e "    Email:    ${CYAN}admin@chitchat.local${RESET}"
+echo -e "    Password: ${CYAN}changeme123!${RESET}"
+echo -e "    ${DIM}Go to http://${SERVER_IP}:${PORT}/admin to create your real admin account.${RESET}"
 echo ""
 echo -e "  ${DIM}Useful commands:${RESET}"
 echo -e "  ${DIM}  Status:   sudo systemctl status ${SERVICE_NAME}${RESET}"
