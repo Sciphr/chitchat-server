@@ -815,7 +815,7 @@
         </div>
         <div class="field-hint">Current implementation strips metadata from JPEG, PNG, and WebP uploads.</div>
         <div class="inline-field">
-          <label>Malware Scan Uploads (ClamAV) <span class="tip" tabindex="0" data-tip="Scans uploads before they are stored. If enabled, files are checked through clamd over TCP.">?</span></label>
+          <label>Malware Scan Uploads (ClamAV) <span class="tip" tabindex="0" data-tip="Scans uploads before they are stored using clamd. Connect via Unix socket (recommended for native installs) or TCP host/port.">?</span></label>
           <label class="toggle">
             <input type="checkbox" id="cfg-files-av-enabled">
             <span class="toggle-slider"></span>
@@ -827,11 +827,16 @@
             <input type="text" id="cfg-files-av-provider" value="clamav" disabled>
           </div>
           <div class="field">
-            <label for="cfg-files-av-clamavHost">ClamAV Host</label>
+            <label for="cfg-files-av-socketPath">Unix Socket Path <span class="tip" tabindex="0" data-tip="Recommended for native ClamAV installs. On Debian/Ubuntu the default is /run/clamav/clamd.ctl. If set, this takes priority over Host/Port below.">?</span></label>
+            <input type="text" id="cfg-files-av-socketPath" placeholder="/run/clamav/clamd.ctl">
+            <div class="field-hint">Use this when ClamAV is installed directly on the host server. Leave blank to use TCP Host/Port.</div>
+          </div>
+          <div class="field">
+            <label for="cfg-files-av-clamavHost">ClamAV Host <span class="tip" tabindex="0" data-tip="Used only when Unix Socket Path is blank.">?</span></label>
             <input type="text" id="cfg-files-av-clamavHost" placeholder="127.0.0.1">
           </div>
           <div class="field">
-            <label for="cfg-files-av-clamavPort">ClamAV Port</label>
+            <label for="cfg-files-av-clamavPort">ClamAV Port <span class="tip" tabindex="0" data-tip="Used only when Unix Socket Path is blank.">?</span></label>
             <input type="number" id="cfg-files-av-clamavPort" min="1" max="65535">
           </div>
           <div class="field">
@@ -1362,6 +1367,17 @@
   </div>
 </div>
 
+<!-- ClamAV Install Instructions Modal -->
+<div id="modal-av-install" class="modal-overlay hidden">
+  <div class="modal" style="width:560px;max-width:95vw">
+    <h3>ClamAV Install Instructions</h3>
+    <div id="av-install-content" style="display:grid;gap:12px;font-size:14px"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary btn-sm" id="av-install-close-btn">Close</button>
+    </div>
+  </div>
+</div>
+
 <div id="modal-room-perms" class="modal-overlay hidden">
   <div class="modal" style="width:600px;max-width:95vw">
     <h3 id="room-perms-title">Room Permissions</h3>
@@ -1701,6 +1717,7 @@
         const av = currentConfig.files.antivirus || {};
         $('#cfg-files-av-enabled').checked = av.enabled === true;
         $('#cfg-files-av-provider').value = av.provider || 'clamav';
+        $('#cfg-files-av-socketPath').value = av.clamavSocketPath || '';
         $('#cfg-files-av-clamavHost').value = av.clamavHost || '127.0.0.1';
         $('#cfg-files-av-clamavPort').value = av.clamavPort || 3310;
         $('#cfg-files-av-timeoutMs').value = av.timeoutMs || 15000;
@@ -1781,6 +1798,7 @@
         antivirus: {
           enabled: $('#cfg-files-av-enabled').checked,
           provider: 'clamav',
+          clamavSocketPath: $('#cfg-files-av-socketPath').value.trim(),
           clamavHost: $('#cfg-files-av-clamavHost').value.trim() || '127.0.0.1',
           clamavPort: parseInt($('#cfg-files-av-clamavPort').value, 10) || 3310,
           timeoutMs: parseInt($('#cfg-files-av-timeoutMs').value, 10) || 15000,
@@ -1839,11 +1857,12 @@
   async function testFilesAvConnection() {
     try {
       const result = await api('GET', '/api/admin/antivirus/test');
+      const loc = result.socketPath ? result.socketPath : `${result.host}:${result.port}`;
       if (result.ok) {
-        $('#files-av-status').textContent = `Scanner reachable (${result.host}:${result.port}) — ${result.detail}`;
+        $('#files-av-status').textContent = `Scanner reachable (${loc}) — ${result.detail}`;
         $('#files-av-status').style.color = 'var(--success)';
       } else {
-        $('#files-av-status').textContent = `Scanner check failed (${result.host}:${result.port}) — ${result.detail}`;
+        $('#files-av-status').textContent = `Scanner check failed (${loc}) — ${result.detail}`;
         $('#files-av-status').style.color = 'var(--danger)';
       }
     } catch (err) {
@@ -1855,15 +1874,19 @@
   async function showFilesAvInstallHelp() {
     try {
       const help = await api('GET', '/api/admin/antivirus/install-instructions');
-      const msg = [
-        `Package manager: ${help.packageManager}`,
-        `Install: ${help.installCommand}`,
-        `Enable service: ${help.enableServiceCommand}`,
-        `Restart service: ${help.restartServiceCommand}`,
-        `Expected service: ${help.expectedService}`,
-        `${help.note}`,
-      ].join('\n\n');
-      window.alert(msg);
+      const steps = [
+        { label: '1. Install ClamAV', cmd: help.installCommand },
+        { label: '2. Enable and start the service', cmd: help.enableServiceCommand },
+        { label: '3. In Admin → Configuration → File Storage, enable scanning and set Unix Socket Path to:', cmd: '/run/clamav/clamd.ctl' },
+        { label: '4. Save and test the connection in the Diagnostics page.', cmd: null },
+      ];
+      $('#av-install-content').innerHTML = steps.map(s => `
+        <div>
+          <div style="font-weight:600;margin-bottom:4px;color:var(--text-primary)">${esc(s.label)}</div>
+          ${s.cmd ? `<pre style="background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;white-space:pre-wrap;word-break:break-all;margin:0;user-select:all">${esc(s.cmd)}</pre>` : ''}
+        </div>
+      `).join('');
+      $('#modal-av-install').classList.remove('hidden');
     } catch (err) {
       toast(err.message, 'error');
     }
@@ -1958,11 +1981,13 @@
         diagDetail('diag-av', null, null);
       } else if (av.ok) {
         diagBadge('diag-av-badge', 'ok');
-        $(`#diag-av-meta`).textContent = `clamd @ ${av.host}:${av.port}`;
+        const avLoc = av.socketPath ? av.socketPath : `${av.host}:${av.port}`;
+        $(`#diag-av-meta`).textContent = `clamd @ ${avLoc}`;
         diagDetail('diag-av', av.detail, 'var(--success)');
       } else {
         diagBadge('diag-av-badge', 'error');
-        $(`#diag-av-meta`).textContent = `clamd @ ${av.host}:${av.port}`;
+        const avLoc = av.socketPath ? av.socketPath : `${av.host}:${av.port}`;
+        $(`#diag-av-meta`).textContent = `clamd @ ${avLoc}`;
         diagDetail('diag-av', av.detail, 'var(--danger)');
       }
 
@@ -2707,6 +2732,7 @@
   $('#restart-server-btn').addEventListener('click', restartServerProcess);
   $('#files-av-test-btn').addEventListener('click', testFilesAvConnection);
   $('#files-av-install-help-btn').addEventListener('click', showFilesAvInstallHelp);
+  $('#av-install-close-btn').addEventListener('click', () => $('#modal-av-install').classList.add('hidden'));
   $('#backup-export-show-passphrase').addEventListener('change', () => {
     syncPassphraseVisibility('#backup-export-show-passphrase', '#backup-export-passphrase');
   });

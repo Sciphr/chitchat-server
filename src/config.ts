@@ -42,6 +42,7 @@ interface FilesAntivirusConfig {
   provider: "clamav";
   clamavHost: string;
   clamavPort: number;
+  clamavSocketPath: string;
   timeoutMs: number;
   failClosed: boolean;
 }
@@ -156,6 +157,7 @@ const DEFAULT_CONFIG: ServerConfig = {
       provider: "clamav",
       clamavHost: "127.0.0.1",
       clamavPort: 3310,
+      clamavSocketPath: "/run/clamav/clamd.ctl",
       timeoutMs: 15000,
       failClosed: true,
     },
@@ -484,6 +486,7 @@ export function getRedactedConfig(): ServerConfig {
         provider: cfg.files.antivirus.provider,
         clamavHost: cfg.files.antivirus.clamavHost,
         clamavPort: cfg.files.antivirus.clamavPort,
+        clamavSocketPath: cfg.files.antivirus.clamavSocketPath,
         timeoutMs: cfg.files.antivirus.timeoutMs,
         failClosed: cfg.files.antivirus.failClosed,
       },

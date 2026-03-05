@@ -548,6 +548,13 @@ router.put("/config", requireAuth, requireAdmin, (req, res) => {
         return;
       }
       if (
+        partial.files.antivirus.clamavSocketPath !== undefined &&
+        typeof partial.files.antivirus.clamavSocketPath !== "string"
+      ) {
+        res.status(400).json({ error: "files.antivirus.clamavSocketPath must be a string" });
+        return;
+      }
+      if (
         partial.files.antivirus.clamavHost !== undefined &&
         (typeof partial.files.antivirus.clamavHost !== "string" ||
           !partial.files.antivirus.clamavHost.trim())

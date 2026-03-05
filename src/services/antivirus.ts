@@ -69,14 +69,24 @@ function parseClamavResponse(raw: string): MalwareScanResult {
   };
 }
 
+type ClamavConnectOpts =
+  | { socketPath: string }
+  | { host: string; port: number };
+
+function connectToClamd(opts: ClamavConnectOpts): net.Socket {
+  if ("socketPath" in opts) {
+    return net.createConnection({ path: opts.socketPath });
+  }
+  return net.createConnection({ host: opts.host, port: opts.port });
+}
+
 async function scanBufferWithClamav(
   buffer: Buffer,
-  host: string,
-  port: number,
+  opts: ClamavConnectOpts,
   timeoutMs: number
 ): Promise<MalwareScanResult> {
   return new Promise((resolve, reject) => {
-    const socket = net.createConnection({ host, port });
+    const socket = connectToClamd(opts);
     const chunks: Buffer[] = [];
     let settled = false;
 
@@ -136,12 +146,11 @@ async function scanBufferWithClamav(
 }
 
 async function pingClamav(
-  host: string,
-  port: number,
+  opts: ClamavConnectOpts,
   timeoutMs: number
 ): Promise<{ ok: boolean; detail: string }> {
   return new Promise((resolve) => {
-    const socket = net.createConnection({ host, port });
+    const socket = connectToClamd(opts);
     const chunks: Buffer[] = [];
     let settled = false;
 
@@ -192,13 +201,12 @@ export async function scanUploadForMalware(
     };
   }
 
+  const connectOpts: ClamavConnectOpts = cfg.clamavSocketPath?.trim()
+    ? { socketPath: cfg.clamavSocketPath.trim() }
+    : { host: cfg.clamavHost, port: cfg.clamavPort };
+
   try {
-    return await scanBufferWithClamav(
-      buffer,
-      cfg.clamavHost,
-      cfg.clamavPort,
-      cfg.timeoutMs
-    );
+    return await scanBufferWithClamav(buffer, connectOpts, cfg.timeoutMs);
   } catch (err) {
     return {
       clean: false,
@@ -212,28 +220,33 @@ export async function scanUploadForMalware(
 
 export async function testAntivirusConnection(): Promise<{
   enabled: boolean;
-  host: string;
-  port: number;
+  socketPath?: string;
+  host?: string;
+  port?: number;
   timeoutMs: number;
   ok: boolean;
   detail: string;
 }> {
   const cfg = getConfig().files.antivirus;
+  const socketPath = cfg.clamavSocketPath?.trim() || "";
+  const usingSocket = !!socketPath;
+  const connectOpts: ClamavConnectOpts = usingSocket
+    ? { socketPath }
+    : { host: cfg.clamavHost, port: cfg.clamavPort };
+
   if (!cfg.enabled) {
     return {
       enabled: false,
-      host: cfg.clamavHost,
-      port: cfg.clamavPort,
+      ...(usingSocket ? { socketPath } : { host: cfg.clamavHost, port: cfg.clamavPort }),
       timeoutMs: cfg.timeoutMs,
       ok: false,
       detail: "Antivirus scanning is currently disabled in config",
     };
   }
-  const result = await pingClamav(cfg.clamavHost, cfg.clamavPort, cfg.timeoutMs);
+  const result = await pingClamav(connectOpts, cfg.timeoutMs);
   return {
     enabled: true,
-    host: cfg.clamavHost,
-    port: cfg.clamavPort,
+    ...(usingSocket ? { socketPath } : { host: cfg.clamavHost, port: cfg.clamavPort }),
     timeoutMs: cfg.timeoutMs,
     ok: result.ok,
     detail: result.detail,
