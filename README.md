@@ -68,6 +68,123 @@ Pre-built images are published to Docker Hub at [`sciphr/chitchat-server`](https
 
 ### Portainer (Recommended for Unraid and similar)
 
+There are two ways to deploy via Portainer. **Option A (web editor paste)** is the quickest — no repo connection needed.
+
+---
+
+#### Option A: Paste directly into the Portainer web editor
+
+1. In Portainer, go to **Stacks → Add stack → Web editor**
+2. Paste the YAML below into the editor
+3. Update the three values marked `# <-- CHANGE THIS` (JWT secret + LiveKit key/secret)
+4. Click **Deploy the stack**
+
+```yaml
+# ChitChat Server - Portainer Stack
+#
+# HOW TO DEPLOY:
+#   1. In Portainer, go to Stacks > Add Stack
+#   2. Paste this entire file into the Web editor
+#   3. Update the values marked with  <-- CHANGE THIS  before deploying
+#   4. Click "Deploy the stack"
+#
+# IMPORTANT: LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be identical
+# in BOTH the `chitchat` and `livekit` services below. Change them
+# together, and use a long random string for each.
+
+services:
+
+  chitchat:
+    image: sciphr/chitchat-server:latest
+    restart: unless-stopped
+    environment:
+      PORT: "3001"
+      DB_PATH: /app/data/chitchat.db
+      DATA_DIR: /app/data
+
+      # -- Authentication ---------------------------------------------------
+      # Generate a strong secret, e.g.: openssl rand -hex 32
+      JWT_SECRET: "change-me-to-a-long-random-secret"   # <-- CHANGE THIS
+
+      # -- LiveKit (must match the livekit service below) -------------------
+      LIVEKIT_URL: ws://livekit:7880
+      LIVEKIT_API_KEY: "devkey"                          # <-- CHANGE THIS
+      LIVEKIT_API_SECRET: "devsecret"                    # <-- CHANGE THIS
+
+      # -- Access control ---------------------------------------------------
+      # For a public server set this to your URL, e.g. https://chat.example.com
+      # Use * to allow all origins (fine for private/LAN installs)
+      CORS_ALLOWED_ORIGINS: "*"
+      CORS_ALLOW_NO_ORIGIN: "true"
+
+      # -- Antivirus (ClamAV is bundled in this stack) ----------------------
+      FILES_AV_ENABLED: "true"
+      FILES_AV_PROVIDER: clamav
+      FILES_AV_CLAMAV_HOST: clamav
+      FILES_AV_CLAMAV_PORT: "3310"
+      FILES_AV_TIMEOUT_MS: "15000"
+      FILES_AV_FAIL_CLOSED: "true"
+
+      # -- Optional: Password reset emails (SMTP) ---------------------------
+      # SMTP_USER: you@example.com
+      # SMTP_PASS: your-smtp-password
+      # SMTP_FROM: you@example.com
+      # SMTP_HOST: smtp.gmail.com
+      # SMTP_PORT: "587"
+      # SMTP_SECURE: "false"
+
+      # -- Optional: GIF search via GIPHY -----------------------------------
+      # GIPHY_ENABLED: "true"
+      # GIPHY_API_KEY: your-giphy-api-key
+      # GIPHY_RATING: pg
+      # GIPHY_MAX_RESULTS: "20"
+
+      # -- Optional: Strip EXIF data from uploaded images -------------------
+      # FILES_STRIP_IMAGE_EXIF: "true"
+
+    depends_on:
+      - livekit
+    ports:
+      - "3001:3001"
+    volumes:
+      - chitchat_data:/app/data
+
+  livekit:
+    image: livekit/livekit-server:latest
+    restart: unless-stopped
+    # Writes the LiveKit config at container startup so no local file is needed.
+    # This makes the stack fully self-contained for Portainer's web editor.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        printf 'port: 7880\nrtc:\n  port_range_start: 50000\n  port_range_end: 50100\n  use_external_ip: true\nlogging:\n  level: info\n' > /tmp/livekit.yaml
+        exec livekit-server --config /tmp/livekit.yaml
+    environment:
+      # Format is  "key: secret"  -- must match chitchat's LIVEKIT_API_KEY / LIVEKIT_API_SECRET above
+      LIVEKIT_KEYS: "devkey: devsecret"                  # <-- CHANGE THIS
+    ports:
+      - "7880:7880/tcp"
+      - "50000-50100:50000-50100/udp"
+
+  clamav:
+    image: clamav/clamav:stable
+    restart: unless-stopped
+    expose:
+      - "3310"
+    volumes:
+      - clamav_db:/var/lib/clamav
+
+volumes:
+  chitchat_data:
+  clamav_db:
+```
+
+This stack file is also available in the repo as [`portainer-stack.yml`](./portainer-stack.yml).
+
+---
+
+#### Option B: Connect Portainer to this repository
+
 1. In Portainer, go to **Stacks → Add stack → Repository**
 2. Set the repository URL to this repo and the compose path to `docker-compose.yml`
 3. Add the following environment variables:
@@ -87,6 +204,8 @@ Pre-built images are published to Docker Hub at [`sciphr/chitchat-server`](https
 > All other settings (server name, registration, CORS, etc.) can be changed at any time via the Admin UI without restarting.
 
 4. Click **Deploy the stack**
+
+---
 
 Text chat works immediately. For voice/video, open the required firewall ports:
 - TCP `7880` (LiveKit)
