@@ -30,8 +30,10 @@ services:
 
       # -- LiveKit (must match the livekit service below) -------------------
       # Set this to your public LiveKit URL (must be wss:// for HTTPS deployments).
-      # NOTE: This env var overrides the Admin UI setting. Remove it entirely
-      # if you want to manage the LiveKit URL from the Admin UI instead.
+      # IMPORTANT: This env var ALWAYS overrides the Admin UI setting on every
+      # redeploy. If you change the URL in the Admin UI it will be reset when
+      # you redeploy the stack. Either keep the correct URL here, or remove
+      # this line entirely to manage the LiveKit URL from the Admin UI only.
       LIVEKIT_URL: "wss://livekit.example.com"           # <-- CHANGE THIS
       LIVEKIT_API_KEY: "devkey"                          # <-- CHANGE THIS
       LIVEKIT_API_SECRET: "devsecret"                    # <-- CHANGE THIS
@@ -73,6 +75,10 @@ services:
       - "3001:3001"
     volumes:
       - chitchat_data:/app/data
+      # Required only if antivirus is enabled and ClamAV is installed on the host.
+      # This bind-mounts the host's ClamAV Unix socket into the container so
+      # chitchat can reach it. Remove this line if you don't use ClamAV.
+      - /run/clamav/clamd.ctl:/run/clamav/clamd.ctl
 
   livekit:
     image: livekit/livekit-server:latest
