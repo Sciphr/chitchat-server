@@ -117,13 +117,13 @@ services:
       CORS_ALLOWED_ORIGINS: "*"
       CORS_ALLOW_NO_ORIGIN: "true"
 
-      # -- Antivirus (ClamAV is bundled in this stack) ----------------------
-      FILES_AV_ENABLED: "true"
-      FILES_AV_PROVIDER: clamav
-      FILES_AV_CLAMAV_HOST: clamav
-      FILES_AV_CLAMAV_PORT: "3310"
-      FILES_AV_TIMEOUT_MS: "15000"
-      FILES_AV_FAIL_CLOSED: "true"
+      # -- Antivirus (ClamAV - disabled by default, see README for optional setup) --
+      # FILES_AV_ENABLED: "true"
+      # FILES_AV_PROVIDER: clamav
+      # FILES_AV_CLAMAV_HOST: clamav
+      # FILES_AV_CLAMAV_PORT: "3310"
+      # FILES_AV_TIMEOUT_MS: "15000"
+      # FILES_AV_FAIL_CLOSED: "true"
 
       # -- Optional: Password reset emails (SMTP) ---------------------------
       # SMTP_USER: you@example.com
@@ -166,17 +166,8 @@ services:
       - "7880:7880/tcp"
       - "50000-50100:50000-50100/udp"
 
-  clamav:
-    image: clamav/clamav:stable
-    restart: unless-stopped
-    expose:
-      - "3310"
-    volumes:
-      - clamav_db:/var/lib/clamav
-
 volumes:
   chitchat_data:
-  clamav_db:
 ```
 
 This stack file is also available in the repo as [`portainer-stack.yml`](./portainer-stack.yml).
@@ -236,12 +227,11 @@ docker compose down
 Notes:
 
 - App data (including SQLite DB and uploads) is stored in a named Docker volume: `chitchat_data`.
-- ClamAV signatures are stored in a named Docker volume: `clamav_db`.
 - Container maps `${HOST_PORT:-3001}:3001` (default host port `3001`).
 - Bundled LiveKit runs in Docker and maps:
   - TCP `${LIVEKIT_PORT:-7880}`
   - UDP `${LIVEKIT_UDP_PORT_START:-50000}` to `${LIVEKIT_UDP_PORT_END:-50100}`
-- ClamAV runs as a bundled sidecar and is enabled by default. Upload scanning is active out of the box.
+- ClamAV is not included by default (see optional setup below).
 - To inspect logs: `docker compose logs -f chitchat`
 
 ## Docker Operations
@@ -253,11 +243,11 @@ Docker mode works well for production, but operators should handle these explici
 2. Backups
    - Back up Docker volumes regularly:
      - `chitchat_data` (database/uploads/config)
-     - `clamav_db` (ClamAV signatures; optional to back up, but helps startup speed)
+     - `clamav_db` (ClamAV signatures; only present if ClamAV is enabled — optional to back up, but helps startup speed)
 3. Updates
    - Re-run installer or pull latest repo + `docker compose up -d --build`.
 4. Logs/monitoring
-   - Use `docker compose logs -f chitchat livekit clamav` and container health checks.
+   - Use `docker compose logs -f chitchat livekit` and container health checks (add `clamav` if enabled).
 5. Secrets
    - Protect `.env` and `deploy/livekit/livekit.yaml` permissions because they contain API secrets.
 6. Reverse proxy/TLS
@@ -318,9 +308,43 @@ For Gmail:
 
 ## Malware Scanning For Uploads (Optional)
 
-ChitChat can scan uploads before they are written to disk using ClamAV (`clamd`).
+ChitChat can scan uploads before they are written to disk using ClamAV (`clamd`). ClamAV is **not included by default** because its large image size (~500 MB + signature downloads) can cause timeouts during initial deployment (e.g. in Portainer).
 
-Environment variables:
+### Adding ClamAV to a Portainer / Docker Compose stack
+
+Add the following service to your stack and enable the env vars in the `chitchat` service:
+
+```yaml
+services:
+  # ... (your existing chitchat and livekit services) ...
+
+  clamav:
+    image: clamav/clamav:stable
+    restart: unless-stopped
+    expose:
+      - "3310"
+    volumes:
+      - clamav_db:/var/lib/clamav
+
+volumes:
+  # ... (your existing volumes) ...
+  clamav_db:
+```
+
+Then uncomment (or add) these env vars under the `chitchat` service:
+
+```yaml
+FILES_AV_ENABLED: "true"
+FILES_AV_PROVIDER: clamav
+FILES_AV_CLAMAV_HOST: clamav
+FILES_AV_CLAMAV_PORT: "3310"
+FILES_AV_TIMEOUT_MS: "15000"
+FILES_AV_FAIL_CLOSED: "true"
+```
+
+> **Note:** ClamAV downloads its signature database on first start, which can take several minutes and requires ~300 MB of disk space. Allow time for it to fully initialize before uploading files.
+
+### Environment variables
 
 - `FILES_AV_ENABLED=true|false` (default: `false`)
 - `FILES_AV_PROVIDER=clamav` (current supported provider)
@@ -329,7 +353,7 @@ Environment variables:
 - `FILES_AV_TIMEOUT_MS` (default: `15000`)
 - `FILES_AV_FAIL_CLOSED=true|false` (default: `true`)
 
-Behavior:
+### Behavior
 
 - If malware is detected, upload is rejected.
 - If scanner is unavailable:

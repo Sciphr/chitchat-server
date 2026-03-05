@@ -12,7 +12,7 @@ services:
       LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit:7880}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-}
-      FILES_AV_ENABLED: ${FILES_AV_ENABLED:-true}
+      FILES_AV_ENABLED: ${FILES_AV_ENABLED:-false}
       FILES_AV_PROVIDER: ${FILES_AV_PROVIDER:-clamav}
       FILES_AV_CLAMAV_HOST: ${FILES_AV_CLAMAV_HOST:-clamav}
       FILES_AV_CLAMAV_PORT: ${FILES_AV_CLAMAV_PORT:-3310}
@@ -37,14 +37,5 @@ services:
     volumes:
       - ./deploy/livekit/livekit.yaml:/etc/livekit.yaml:ro
 
-  clamav:
-    image: clamav/clamav:stable
-    restart: unless-stopped
-    expose:
-      - "3310"
-    volumes:
-      - clamav_db:/var/lib/clamav
-
 volumes:
   chitchat_data:
-  clamav_db:
