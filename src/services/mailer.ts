@@ -26,6 +26,52 @@ export function isMailConfigured(): boolean {
   return readMailConfig() !== null;
 }
 
+export async function testSmtpConnection(): Promise<{
+  configured: boolean;
+  ok: boolean;
+  detail: string;
+  host?: string;
+  port?: number;
+  user?: string;
+}> {
+  const cfg = readMailConfig();
+  if (!cfg) {
+    return {
+      configured: false,
+      ok: false,
+      detail:
+        "SMTP is not configured. Set host, user, password, and from address in Configuration → Password Reset Email.",
+    };
+  }
+  const transport = nodemailer.createTransport({
+    host: cfg.host,
+    port: cfg.port,
+    secure: cfg.secure,
+    auth: { user: cfg.user, pass: cfg.pass },
+  });
+  try {
+    await transport.verify();
+    return {
+      configured: true,
+      ok: true,
+      detail: `SMTP connection verified (${cfg.host}:${cfg.port}).`,
+      host: cfg.host,
+      port: cfg.port,
+      user: cfg.user,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "SMTP verification failed";
+    return {
+      configured: true,
+      ok: false,
+      detail: msg,
+      host: cfg.host,
+      port: cfg.port,
+      user: cfg.user,
+    };
+  }
+}
+
 export async function sendMail(input: {
   to: string;
   subject: string;

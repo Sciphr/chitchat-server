@@ -3,6 +3,7 @@ import type { Request } from "express";
 import crypto from "crypto";
 import path from "path";
 import bcrypt from "bcryptjs";
+import { RoomServiceClient } from "livekit-server-sdk";
 import {
   getConfig,
   getRedactedConfig,
@@ -22,6 +23,7 @@ import {
   getAntivirusInstallInstructions,
   testAntivirusConnection,
 } from "../services/antivirus.js";
+import { testSmtpConnection } from "../services/mailer.js";
 import {
   createEncryptedDatabaseBackup,
   migrateAttachmentStorageRoot,
@@ -30,6 +32,99 @@ import {
 import { getUserPermissions } from "../permissions.js";
 
 const router = Router();
+
+async function testLiveKitConnection(): Promise<{
+  configured: boolean;
+  ok: boolean;
+  url: string;
+  apiKeyPresent: boolean;
+  apiSecretPresent: boolean;
+  detail: string;
+  warnings: string[];
+}> {
+  const cfg = getConfig().livekit;
+  const warnings: string[] = [];
+  const url = (cfg.url || "").trim();
+  const apiKey = (cfg.apiKey || "").trim();
+  const apiSecret = (cfg.apiSecret || "").trim();
+
+  if (!url || !apiKey || !apiSecret) {
+    return {
+      configured: false,
+      ok: false,
+      url,
+      apiKeyPresent: Boolean(apiKey),
+      apiSecretPresent: Boolean(apiSecret),
+      detail: [
+        !url && "LiveKit URL is not set.",
+        !apiKey && "API key is not set.",
+        !apiSecret && "API secret is not set.",
+      ]
+        .filter(Boolean)
+        .join(" ") + " Configure these in Configuration → Voice & Video.",
+      warnings: [],
+    };
+  }
+
+  if (/^wss?:\/\/livekit(:\d+)?\/?$/.test(url)) {
+    warnings.push(
+      'URL points to the internal Docker hostname "livekit". External clients cannot reach this — set LIVEKIT_URL to your public wss:// domain, or remove the env var and set it in the Admin UI.'
+    );
+  }
+  if (apiKey === "devkey" || apiSecret === "devsecret") {
+    warnings.push(
+      "Default dev credentials detected (devkey/devsecret). Change both to strong random values before exposing this server publicly."
+    );
+  }
+  if (/^ws:\/\//i.test(url)) {
+    warnings.push(
+      "URL uses ws:// (unencrypted). Browsers served over HTTPS will block ws:// connections — use wss:// when running behind a TLS reverse proxy."
+    );
+  }
+
+  const httpUrl = url
+    .replace(/^wss:\/\//, "https://")
+    .replace(/^ws:\/\//, "http://");
+
+  try {
+    const svc = new RoomServiceClient(httpUrl, apiKey, apiSecret);
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Connection timed out after 10 seconds")), 10000)
+    );
+    await Promise.race([svc.listRooms(), timeout]);
+    return {
+      configured: true,
+      ok: true,
+      url,
+      apiKeyPresent: true,
+      apiSecretPresent: true,
+      detail: "Connected to LiveKit server and API credentials verified successfully.",
+      warnings,
+    };
+  } catch (err) {
+    const raw = err instanceof Error ? err.message : String(err);
+    let detail = raw;
+    if (/ECONNREFUSED|ENOTFOUND|ETIMEDOUT|network/i.test(raw)) {
+      detail =
+        `Connection failed: ${raw}\n\nCheck that the LiveKit container is running and the URL is reachable from the server.`;
+    } else if (/unauthorized|forbidden|401|403|invalid/i.test(raw)) {
+      detail =
+        `Authentication failed: ${raw}\n\nThe API key or secret does not match the LiveKit container's LIVEKIT_KEYS setting. Ensure LIVEKIT_API_KEY and LIVEKIT_API_SECRET in the chitchat service match the key:secret pair in the livekit service.`;
+    } else if (/timeout/i.test(raw)) {
+      detail =
+        `${raw}\n\nThe LiveKit server did not respond. Check that the container is healthy and the URL and port are correct.`;
+    }
+    return {
+      configured: true,
+      ok: false,
+      url,
+      apiKeyPresent: true,
+      apiSecretPresent: true,
+      detail,
+      warnings,
+    };
+  }
+}
 
 function generateInviteCode(length = 10) {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
@@ -1627,6 +1722,16 @@ router.get("/audit-logs", requireAuth, requireAdmin, (req, res) => {
 // GET /api/admin/resources — runtime system/network/connection metrics
 router.get("/resources", requireAuth, requireAdmin, (_req, res) => {
   res.json(getResourceSnapshot());
+});
+
+// GET /api/admin/diagnostics — check connectivity of all configured external services
+router.get("/diagnostics", requireAuth, requireAdmin, async (_req, res) => {
+  const [livekit, smtp, antivirus] = await Promise.all([
+    testLiveKitConnection(),
+    testSmtpConnection(),
+    testAntivirusConnection(),
+  ]);
+  res.json({ livekit, smtp, antivirus });
 });
 
 // GET /api/admin/antivirus/test — verify configured clamd connectivity

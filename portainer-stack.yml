@@ -6,6 +6,10 @@
 #   3. Update the values marked with  <-- CHANGE THIS  before deploying
 #   4. Click "Deploy the stack"
 #
+# POST-DEPLOY STEPS:
+#   - Log in to the ChitChat Admin UI and go to Admin → Security
+#   - Enable "Trust Reverse Proxy" (required when running behind Nginx Proxy Manager)
+#
 # IMPORTANT: LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be identical
 # in BOTH the `chitchat` and `livekit` services below. Change them
 # together, and use a long random string for each.
@@ -25,7 +29,10 @@ services:
       JWT_SECRET: "change-me-to-a-long-random-secret"   # <-- CHANGE THIS
 
       # -- LiveKit (must match the livekit service below) -------------------
-      LIVEKIT_URL: ws://livekit:7880
+      # Set this to your public LiveKit URL (must be wss:// for HTTPS deployments).
+      # NOTE: This env var overrides the Admin UI setting. Remove it entirely
+      # if you want to manage the LiveKit URL from the Admin UI instead.
+      LIVEKIT_URL: "wss://livekit.example.com"           # <-- CHANGE THIS
       LIVEKIT_API_KEY: "devkey"                          # <-- CHANGE THIS
       LIVEKIT_API_SECRET: "devsecret"                    # <-- CHANGE THIS
 
@@ -70,13 +77,10 @@ services:
   livekit:
     image: livekit/livekit-server:latest
     restart: unless-stopped
-    # Writes the LiveKit config at container startup so no local file is needed.
-    # This makes the stack fully self-contained for Portainer's web editor.
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        printf 'port: 7880\nrtc:\n  port_range_start: 50000\n  port_range_end: 50100\n  use_external_ip: true\nlogging:\n  level: info\n' > /tmp/livekit.yaml
-        exec livekit-server --config /tmp/livekit.yaml
+    # --dev enables development mode (no TLS required); --bind 0.0.0.0 ensures
+    # the server listens on all interfaces inside the container.
+    # API keys are set via the LIVEKIT_KEYS env var below — no config file needed.
+    command: --dev --bind 0.0.0.0
     environment:
       # Format is  "key: secret"  -- must match chitchat's LIVEKIT_API_KEY / LIVEKIT_API_SECRET above
       LIVEKIT_KEYS: "devkey: devsecret"                  # <-- CHANGE THIS
