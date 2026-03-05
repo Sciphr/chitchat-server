@@ -35,13 +35,13 @@ services:
       CORS_ALLOWED_ORIGINS: "*"
       CORS_ALLOW_NO_ORIGIN: "true"
 
-      # -- Antivirus (ClamAV is bundled in this stack) ----------------------
-      FILES_AV_ENABLED: "true"
-      FILES_AV_PROVIDER: clamav
-      FILES_AV_CLAMAV_HOST: clamav
-      FILES_AV_CLAMAV_PORT: "3310"
-      FILES_AV_TIMEOUT_MS: "15000"
-      FILES_AV_FAIL_CLOSED: "true"
+      # -- Antivirus (ClamAV - disabled by default, see README for optional setup) --
+      # FILES_AV_ENABLED: "true"
+      # FILES_AV_PROVIDER: clamav
+      # FILES_AV_CLAMAV_HOST: clamav
+      # FILES_AV_CLAMAV_PORT: "3310"
+      # FILES_AV_TIMEOUT_MS: "15000"
+      # FILES_AV_FAIL_CLOSED: "true"
 
       # -- Optional: Password reset emails (SMTP) ---------------------------
       # SMTP_USER: you@example.com
@@ -84,14 +84,5 @@ services:
       - "7880:7880/tcp"
       - "50000-50100:50000-50100/udp"
 
-  clamav:
-    image: clamav/clamav:stable
-    restart: unless-stopped
-    expose:
-      - "3310"
-    volumes:
-      - clamav_db:/var/lib/clamav
-
 volumes:
   chitchat_data:
-  clamav_db:
