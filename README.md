@@ -1,4 +1,4 @@
-# ChitChat Server
+# ChitChat Server - Sciphr
 
 Node/Express backend for ChitChat.
 
@@ -93,7 +93,6 @@ There are two ways to deploy via Portainer. **Option A (web editor paste)** is t
 # together, and use a long random string for each.
 
 services:
-
   chitchat:
     image: sciphr/chitchat-server:latest
     restart: unless-stopped
@@ -104,12 +103,12 @@ services:
 
       # -- Authentication ---------------------------------------------------
       # Generate a strong secret, e.g.: openssl rand -hex 32
-      JWT_SECRET: "change-me-to-a-long-random-secret"   # <-- CHANGE THIS
+      JWT_SECRET: "change-me-to-a-long-random-secret" # <-- CHANGE THIS
 
       # -- LiveKit (must match the livekit service below) -------------------
       LIVEKIT_URL: ws://livekit:7880
-      LIVEKIT_API_KEY: "devkey"                          # <-- CHANGE THIS
-      LIVEKIT_API_SECRET: "devsecret"                    # <-- CHANGE THIS
+      LIVEKIT_API_KEY: "devkey" # <-- CHANGE THIS
+      LIVEKIT_API_SECRET: "devsecret" # <-- CHANGE THIS
 
       # -- Access control ---------------------------------------------------
       # For a public server set this to your URL, e.g. https://chat.example.com
@@ -161,7 +160,7 @@ services:
         exec livekit-server --config /tmp/livekit.yaml
     environment:
       # Format is  "key: secret"  -- must match chitchat's LIVEKIT_API_KEY / LIVEKIT_API_SECRET above
-      LIVEKIT_KEYS: "devkey: devsecret"                  # <-- CHANGE THIS
+      LIVEKIT_KEYS: "devkey: devsecret" # <-- CHANGE THIS
     ports:
       - "7880:7880/tcp"
       - "50000-50100:50000-50100/udp"
@@ -180,15 +179,15 @@ This stack file is also available in the repo as [`portainer-stack.yml`](./porta
 2. Set the repository URL to this repo and the compose path to `docker-compose.yml`
 3. Add the following environment variables:
 
-| Variable | Required | Description |
-|---|---|---|
-| `ADMIN_EMAIL` | Yes (first boot only) | Email address for the initial admin account. Ignored after first boot. |
-| `ADMIN_USERNAME` | Yes (first boot only) | Username for the initial admin account. Ignored after first boot. |
-| `ADMIN_PASSWORD` | Yes (first boot only) | Password for the initial admin account (min 10 characters). Used once to create the account, then stored as a bcrypt hash in the database. Can be removed from env vars after first deploy. |
-| `LIVEKIT_API_KEY` | Yes (for voice) | Any string, e.g. `mykey` |
-| `LIVEKIT_API_SECRET` | Yes (for voice) | Random string, minimum 32 characters |
-| `LIVEKIT_URL` | No | Defaults to `ws://livekit:7880` (correct for the bundled container) |
-| `HOST_PORT` | No | Host port to expose the app on. Defaults to `3001` |
+| Variable             | Required              | Description                                                                                                                                                                                 |
+| -------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ADMIN_EMAIL`        | Yes (first boot only) | Email address for the initial admin account. Ignored after first boot.                                                                                                                      |
+| `ADMIN_USERNAME`     | Yes (first boot only) | Username for the initial admin account. Ignored after first boot.                                                                                                                           |
+| `ADMIN_PASSWORD`     | Yes (first boot only) | Password for the initial admin account (min 10 characters). Used once to create the account, then stored as a bcrypt hash in the database. Can be removed from env vars after first deploy. |
+| `LIVEKIT_API_KEY`    | Yes (for voice)       | Any string, e.g. `mykey`                                                                                                                                                                    |
+| `LIVEKIT_API_SECRET` | Yes (for voice)       | Random string, minimum 32 characters                                                                                                                                                        |
+| `LIVEKIT_URL`        | No                    | Defaults to `ws://livekit:7880` (correct for the bundled container)                                                                                                                         |
+| `HOST_PORT`          | No                    | Host port to expose the app on. Defaults to `3001`                                                                                                                                          |
 
 > **Important:** `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` must be set before deploying. These are used by both the ChitChat server and the bundled LiveKit container — they must always match. If you ever change them in the Admin UI, you must also update the environment variables in Portainer and restart the stack, otherwise voice will stop working.
 >
@@ -202,16 +201,17 @@ This stack file is also available in the repo as [`portainer-stack.yml`](./porta
 
 On first boot the server creates a default admin account:
 
-| Field | Value |
-|---|---|
-| **Email** | `admin@chitchat.local` |
-| **Password** | `changeme123!` |
+| Field        | Value                  |
+| ------------ | ---------------------- |
+| **Email**    | `admin@chitchat.local` |
+| **Password** | `changeme123!`         |
 
 Go to `/admin`, log in with these credentials, and complete the setup wizard to replace this account with your own. **Change the password immediately** — the defaults are public.
 
 ---
 
 Text chat works immediately. For voice/video, open the required firewall ports:
+
 - TCP `7880` (LiveKit)
 - UDP `50000–50100` (LiveKit media)
 
