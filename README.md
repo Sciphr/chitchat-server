@@ -198,6 +198,19 @@ This stack file is also available in the repo as [`portainer-stack.yml`](./porta
 
 ---
 
+### First Login
+
+On first boot the server creates a default admin account:
+
+| Field | Value |
+|---|---|
+| **Email** | `admin@chitchat.local` |
+| **Password** | `changeme123!` |
+
+Go to `/admin`, log in with these credentials, and complete the setup wizard to replace this account with your own. **Change the password immediately** — the defaults are public.
+
+---
+
 Text chat works immediately. For voice/video, open the required firewall ports:
 - TCP `7880` (LiveKit)
 - UDP `50000–50100` (LiveKit media)
