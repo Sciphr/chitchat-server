@@ -34,6 +34,8 @@ services:
     ports:
       - "${LIVEKIT_PORT:-7880}:7880/tcp"
       - "${LIVEKIT_UDP_PORT_START:-50000}-${LIVEKIT_UDP_PORT_END:-50100}:${LIVEKIT_UDP_PORT_START:-50000}-${LIVEKIT_UDP_PORT_END:-50100}/udp"
+      - "3478:3478/udp"
+      - "5349:5349/tcp"
     volumes:
       - ./deploy/livekit/livekit.yaml:/etc/livekit.yaml:ro
 

@@ -3,5 +3,11 @@ rtc:
   port_range_start: 50000
   port_range_end: 50100
   use_external_ip: true
+turn:
+  enabled: true
+  domain: livekit.example.com   # <-- CHANGE THIS to your server's domain (must have a valid TLS certificate)
+  tls_port: 5349
+  udp_port: 3478
+  external_tls: false
 logging:
   level: info

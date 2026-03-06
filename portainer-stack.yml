@@ -90,9 +90,31 @@ services:
     environment:
       # Format is  "key: secret"  -- must match chitchat's LIVEKIT_API_KEY / LIVEKIT_API_SECRET above
       LIVEKIT_KEYS: "devkey: devsecret"                  # <-- CHANGE THIS
+
+      # -- RTC port range (required for voice to work) ----------------------
+      # This locks LiveKit to ports 50000-50100 so they match the Docker port
+      # mapping above. Without this, LiveKit uses random ports that are
+      # unreachable and voice connections will always fail.
+      LIVEKIT_CONFIG: |
+        rtc:
+          port_range_start: 50000
+          port_range_end: 50100
+          use_external_ip: true
+
+        # -- TURN relay (optional, for users behind strict firewalls/NAT) ---
+        # Requires a domain with a valid TLS certificate pointing to this server.
+        # Uncomment and set your domain to enable:
+        # turn:
+        #   enabled: true
+        #   domain: livekit.example.com
+        #   tls_port: 5349
+        #   udp_port: 3478
+        #   external_tls: false
     ports:
       - "7880:7880/tcp"
       - "50000-50100:50000-50100/udp"
+      - "3478:3478/udp"
+      - "5349:5349/tcp"
 
 volumes:
   chitchat_data:
