@@ -61,14 +61,14 @@ async function testLiveKitConnection(): Promise<{
         !apiSecret && "API secret is not set.",
       ]
         .filter(Boolean)
-        .join(" ") + " Configure these in Configuration → Voice & Video.",
+        .join(" ") + " Configure these in Configuration > Voice & Video.",
       warnings: [],
     };
   }
 
   if (/^wss?:\/\/livekit(:\d+)?\/?$/.test(url)) {
     warnings.push(
-      'URL points to the internal Docker hostname "livekit". External clients cannot reach this — set LIVEKIT_URL to your public wss:// domain, or remove the env var and set it in the Admin UI.'
+      'Using the bundled Docker LiveKit hostname "livekit". For direct IP/hostname installs, clients will auto-use the same host on port 7880. If you deploy behind HTTPS/reverse proxy or a separate LiveKit host, set a public LiveKit URL in Admin > Configuration > Voice & Video.'
     );
   }
   if (apiKey === "devkey" || apiSecret === "devsecret") {
@@ -78,7 +78,7 @@ async function testLiveKitConnection(): Promise<{
   }
   if (/^ws:\/\//i.test(url)) {
     warnings.push(
-      "URL uses ws:// (unencrypted). Browsers served over HTTPS will block ws:// connections — use wss:// when running behind a TLS reverse proxy."
+      "URL uses ws:// (unencrypted). Browsers served over HTTPS will block ws:// connections - use wss:// when running behind a TLS reverse proxy."
     );
   }
 
@@ -109,7 +109,7 @@ async function testLiveKitConnection(): Promise<{
         `Connection failed: ${raw}\n\nCheck that the LiveKit container is running and the URL is reachable from the server.`;
     } else if (/unauthorized|forbidden|401|403|invalid/i.test(raw)) {
       detail =
-        `Authentication failed: ${raw}\n\nThe API key or secret does not match the LiveKit container's LIVEKIT_KEYS setting. Ensure LIVEKIT_API_KEY and LIVEKIT_API_SECRET in the chitchat service match the key:secret pair in the livekit service.`;
+        `Authentication failed: ${raw}\n\nThe API key or secret does not match the running LiveKit server. Ensure ChitChat and LiveKit are using the same key:secret pair, and restart the LiveKit container or service after rotating credentials.`;
     } else if (/timeout/i.test(raw)) {
       detail =
         `${raw}\n\nThe LiveKit server did not respond. Check that the container is healthy and the URL and port are correct.`;
@@ -154,7 +154,7 @@ function ensureDefaultRole() {
   ).run();
 }
 
-// GET /api/admin/setup-status — check if the server still has the default setup account
+// GET /api/admin/setup-status - check if the server still has the default setup account
 router.get("/setup-status", requireAuth, requireAdmin, (_req, res) => {
   const db = getDb();
   const setupAccount = db
@@ -163,7 +163,7 @@ router.get("/setup-status", requireAuth, requireAdmin, (_req, res) => {
   res.json({ requiresSetup: Boolean(setupAccount) });
 });
 
-// POST /api/admin/complete-setup — replace the default setup account with a real admin
+// POST /api/admin/complete-setup - replace the default setup account with a real admin
 router.post("/complete-setup", requireAuth, requireAdmin, (req, res) => {
   const config = getConfig();
   const db = getDb();
@@ -264,12 +264,12 @@ router.post("/complete-setup", requireAuth, requireAdmin, (req, res) => {
   });
 });
 
-// GET /api/admin/config — return redacted config
+// GET /api/admin/config - return redacted config
 router.get("/config", requireAuth, requireAdmin, (_req, res) => {
   res.json(getRedactedConfig());
 });
 
-// PUT /api/admin/config — partial update
+// PUT /api/admin/config - partial update
 router.put("/config", requireAuth, requireAdmin, (req, res) => {
   const partial = req.body as Partial<ServerConfig>;
   const currentConfig = getConfig();
@@ -673,8 +673,13 @@ router.put("/config", requireAuth, requireAdmin, (req, res) => {
       }
     }
 
-    const { requiresRestart } = updateConfig(partial);
-    res.json({ config: getRedactedConfig(), requiresRestart, storageMigration });
+    const { requiresRestart, requiresLivekitRestart } = updateConfig(partial);
+    res.json({
+      config: getRedactedConfig(),
+      requiresRestart,
+      requiresLivekitRestart,
+      storageMigration,
+    });
   } catch (err) {
     console.error("Failed to update config:", err);
     res.status(500).json({
@@ -683,7 +688,7 @@ router.put("/config", requireAuth, requireAdmin, (req, res) => {
   }
 });
 
-// GET /api/admin/stats — server statistics
+// GET /api/admin/stats - server statistics
 router.get("/stats", requireAuth, requireAdmin, (_req, res) => {
   const db = getDb();
   const users = db.prepare("SELECT COUNT(*) as count FROM users").get() as { count: number };
@@ -699,7 +704,7 @@ router.get("/stats", requireAuth, requireAdmin, (_req, res) => {
   });
 });
 
-// GET /api/admin/users — list all users
+// GET /api/admin/users - list all users
 router.get("/users", requireAuth, requireAdmin, (_req, res) => {
   const db = getDb();
   const users = db
@@ -862,7 +867,7 @@ router.post(
   }
 );
 
-// DELETE /api/admin/users/:id — delete a user
+// DELETE /api/admin/users/:id - delete a user
 router.delete("/users/:id", requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const user = db.prepare("SELECT id, email FROM users WHERE id = ?").get(req.params.id) as { id: string; email: string } | undefined;
@@ -882,7 +887,7 @@ router.delete("/users/:id", requireAuth, requireAdmin, (req, res) => {
   res.json({ success: true });
 });
 
-// GET /api/admin/rooms — list all rooms with member/message counts
+// GET /api/admin/rooms - list all rooms with member/message counts
 router.get("/rooms", requireAuth, requireAdmin, (_req, res) => {
   const db = getDb();
   const rooms = db
@@ -897,7 +902,7 @@ router.get("/rooms", requireAuth, requireAdmin, (_req, res) => {
   res.json(rooms);
 });
 
-// PUT /api/admin/rooms/:id/retention — set room message retention policy
+// PUT /api/admin/rooms/:id/retention - set room message retention policy
 router.put("/rooms/:id/retention", requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const room = db
@@ -943,7 +948,7 @@ router.put("/rooms/:id/retention", requireAuth, requireAdmin, (req, res) => {
   res.json(updated);
 });
 
-// POST /api/admin/rooms — create a room
+// POST /api/admin/rooms - create a room
 router.post("/rooms", requireAuth, requireAdmin, (req, res) => {
   const { name, type } = req.body;
   if (!name || !type) {
@@ -966,7 +971,7 @@ router.post("/rooms", requireAuth, requireAdmin, (req, res) => {
   res.json({ id, name, type, created_by: "admin" });
 });
 
-// DELETE /api/admin/rooms/:id — delete a room
+// DELETE /api/admin/rooms/:id - delete a room
 router.delete("/rooms/:id", requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const room = db.prepare("SELECT id FROM rooms WHERE id = ?").get(req.params.id);
@@ -979,7 +984,7 @@ router.delete("/rooms/:id", requireAuth, requireAdmin, (req, res) => {
   res.json({ success: true });
 });
 
-// GET /api/admin/roles — list roles, user-role assignments, and room permissions
+// GET /api/admin/roles - list roles, user-role assignments, and room permissions
 router.get("/roles", requireAuth, requireAdmin, (_req, res) => {
   ensureDefaultRole();
   const db = getDb();
@@ -1032,7 +1037,7 @@ router.get("/roles", requireAuth, requireAdmin, (_req, res) => {
   res.json({ roles, userRoles, roomPermissions });
 });
 
-// POST /api/admin/roles — create role
+// POST /api/admin/roles - create role
 router.post("/roles", requireAuth, requireAdmin, (req, res) => {
   ensureDefaultRole();
   const db = getDb();
@@ -1104,7 +1109,7 @@ router.post("/roles", requireAuth, requireAdmin, (req, res) => {
   res.status(201).json(role);
 });
 
-// PUT /api/admin/roles/:id — update role
+// PUT /api/admin/roles/:id - update role
 router.put("/roles/:id", requireAuth, requireAdmin, (req, res) => {
   ensureDefaultRole();
   const db = getDb();
@@ -1252,7 +1257,7 @@ router.put("/roles/:id", requireAuth, requireAdmin, (req, res) => {
   res.json(updated);
 });
 
-// DELETE /api/admin/roles/:id — delete role
+// DELETE /api/admin/roles/:id - delete role
 router.delete("/roles/:id", requireAuth, requireAdmin, (req, res) => {
   ensureDefaultRole();
   const db = getDb();
@@ -1272,7 +1277,7 @@ router.delete("/roles/:id", requireAuth, requireAdmin, (req, res) => {
   res.json({ success: true });
 });
 
-// GET /api/admin/users/:id/roles — list role ids for user
+// GET /api/admin/users/:id/roles - list role ids for user
 router.get("/users/:id/roles", requireAuth, requireAdmin, (req, res) => {
   ensureDefaultRole();
   const db = getDb();
@@ -1289,7 +1294,7 @@ router.get("/users/:id/roles", requireAuth, requireAdmin, (req, res) => {
   res.json({ roleIds: rows.map((row) => row.role_id) });
 });
 
-// PUT /api/admin/users/:id/roles — replace role ids for user (excluding implicit @everyone)
+// PUT /api/admin/users/:id/roles - replace role ids for user (excluding implicit @everyone)
 router.put("/users/:id/roles", requireAuth, requireAdmin, (req, res) => {
   ensureDefaultRole();
   const db = getDb();
@@ -1329,7 +1334,7 @@ router.put("/users/:id/roles", requireAuth, requireAdmin, (req, res) => {
   res.json({ success: true, roleIds: cleaned });
 });
 
-// GET /api/admin/rooms/:id/permissions — list role permissions for a room
+// GET /api/admin/rooms/:id/permissions - list role permissions for a room
 router.get("/rooms/:id/permissions", requireAuth, requireAdmin, (req, res) => {
   ensureDefaultRole();
   const db = getDb();
@@ -1362,7 +1367,7 @@ router.get("/rooms/:id/permissions", requireAuth, requireAdmin, (req, res) => {
   });
 });
 
-// PUT /api/admin/rooms/:id/permissions — replace room role permissions
+// PUT /api/admin/rooms/:id/permissions - replace room role permissions
 router.put("/rooms/:id/permissions", requireAuth, requireAdmin, (req, res) => {
   ensureDefaultRole();
   const db = getDb();
@@ -1410,7 +1415,7 @@ router.put("/rooms/:id/permissions", requireAuth, requireAdmin, (req, res) => {
   res.json({ success: true });
 });
 
-// GET /api/admin/invites — list invite links
+// GET /api/admin/invites - list invite links
 router.get("/invites", requireAuth, requireAdmin, (_req, res) => {
   const db = getDb();
   const invites = db
@@ -1425,7 +1430,7 @@ router.get("/invites", requireAuth, requireAdmin, (_req, res) => {
   res.json(invites);
 });
 
-// POST /api/admin/invites — create invite link
+// POST /api/admin/invites - create invite link
 router.post("/invites", requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const creatorUserId = (req as any).user.userId as string;
@@ -1489,7 +1494,7 @@ router.post("/invites", requireAuth, requireAdmin, (req, res) => {
   res.status(201).json(invite);
 });
 
-// PUT /api/admin/invites/:id — update invite link metadata
+// PUT /api/admin/invites/:id - update invite link metadata
 router.put("/invites/:id", requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const invite = db
@@ -1578,7 +1583,7 @@ router.put("/invites/:id", requireAuth, requireAdmin, (req, res) => {
   res.json(updated);
 });
 
-// DELETE /api/admin/invites/:id — delete invite link
+// DELETE /api/admin/invites/:id - delete invite link
 router.delete("/invites/:id", requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const result = db.prepare("DELETE FROM invite_links WHERE id = ?").run(req.params.id);
@@ -1589,7 +1594,7 @@ router.delete("/invites/:id", requireAuth, requireAdmin, (req, res) => {
   res.json({ success: true });
 });
 
-// GET /api/admin/audit-logs — filterable/sortable audit log table data
+// GET /api/admin/audit-logs - filterable/sortable audit log table data
 router.get("/audit-logs", requireAuth, requireAdmin, (req, res) => {
   const db = getDb();
   const page = Math.max(1, Number(req.query.page || 1) || 1);
@@ -1726,12 +1731,12 @@ router.get("/audit-logs", requireAuth, requireAdmin, (req, res) => {
   });
 });
 
-// GET /api/admin/resources — runtime system/network/connection metrics
+// GET /api/admin/resources - runtime system/network/connection metrics
 router.get("/resources", requireAuth, requireAdmin, (_req, res) => {
   res.json(getResourceSnapshot());
 });
 
-// GET /api/admin/diagnostics — check connectivity of all configured external services
+// GET /api/admin/diagnostics - check connectivity of all configured external services
 router.get("/diagnostics", requireAuth, requireAdmin, async (_req, res) => {
   const [livekit, smtp, antivirus] = await Promise.all([
     testLiveKitConnection(),
@@ -1741,13 +1746,13 @@ router.get("/diagnostics", requireAuth, requireAdmin, async (_req, res) => {
   res.json({ livekit, smtp, antivirus });
 });
 
-// GET /api/admin/antivirus/test — verify configured clamd connectivity
+// GET /api/admin/antivirus/test - verify configured clamd connectivity
 router.get("/antivirus/test", requireAuth, requireAdmin, async (_req, res) => {
   const result = await testAntivirusConnection();
   res.json(result);
 });
 
-// GET /api/admin/antivirus/install-instructions — manual setup helper
+// GET /api/admin/antivirus/install-instructions - manual setup helper
 router.get("/antivirus/install-instructions", requireAuth, requireAdmin, (_req, res) => {
   res.json(getAntivirusInstallInstructions());
 });

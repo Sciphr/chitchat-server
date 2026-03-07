@@ -253,15 +253,11 @@ export function loadConfig(): ServerConfig {
     console.log(`  Config: generating ${configPath}`);
   }
 
-  // Merge file config over defaults
-  const merged: ServerConfig = deepMerge(DEFAULT_CONFIG, fileConfig);
+  // Start with defaults, then seed values from env vars. Persisted config.json
+  // is merged last so Admin-saved settings survive redeploys and updates.
+  let merged: ServerConfig = deepMerge(DEFAULT_CONFIG, {});
 
-  // Generate JWT secret if empty
-  if (!merged.jwtSecret) {
-    merged.jwtSecret = crypto.randomBytes(32).toString("hex");
-  }
-
-  // Env var overrides (highest priority)
+  // Env vars seed values when config.json does not already define them.
   if (process.env.PORT) merged.port = parseInt(process.env.PORT, 10);
   if (process.env.TRUST_PROXY) {
     merged.trustProxy = process.env.TRUST_PROXY.toLowerCase() === "true";
@@ -354,13 +350,22 @@ export function loadConfig(): ServerConfig {
   if (process.env.GIPHY_MAX_RESULTS) {
     merged.giphy.maxResults = parseInt(process.env.GIPHY_MAX_RESULTS, 10);
   }
-  merged.cors = sanitizeCorsConfig(merged.cors);
   if (process.env.REGISTRATION_MIN_PASSWORD_LENGTH) {
     merged.registration.minPasswordLength = parseInt(
       process.env.REGISTRATION_MIN_PASSWORD_LENGTH,
       10
     );
   }
+
+  // Persisted config wins over env-provided defaults on later boots.
+  merged = deepMerge(merged, fileConfig);
+
+  // Generate JWT secret if empty
+  if (!merged.jwtSecret) {
+    merged.jwtSecret = crypto.randomBytes(32).toString("hex");
+  }
+
+  merged.cors = sanitizeCorsConfig(merged.cors);
   if (
     !Number.isInteger(merged.registration.minPasswordLength) ||
     merged.registration.minPasswordLength < 6
@@ -448,7 +453,7 @@ export function loadConfig(): ServerConfig {
   try {
     fs.writeFileSync(configPath, JSON.stringify(merged, null, 2) + "\n");
   } catch {
-    // Non-fatal — might be read-only filesystem
+    // Non-fatal - might be read-only filesystem
   }
 
   config = merged;
@@ -510,12 +515,17 @@ export function getRedactedConfig(): ServerConfig {
 
 export function updateConfig(
   partial: Partial<ServerConfig>
-): { config: ServerConfig; requiresRestart: string[] } {
+): {
+  config: ServerConfig;
+  requiresRestart: string[];
+  requiresLivekitRestart: boolean;
+} {
   if (!config) {
     throw new Error("Config not loaded. Call loadConfig() first.");
   }
 
   const requiresRestart: string[] = [];
+  let requiresLivekitRestart = false;
 
   for (const field of RESTART_REQUIRED_FIELDS) {
     if (
@@ -525,6 +535,11 @@ export function updateConfig(
       requiresRestart.push(field);
     }
   }
+
+  const livekitCredentialsSubmitted =
+    partial.livekit !== undefined &&
+    (((partial.livekit as Partial<LiveKitConfig>).apiKey !== undefined) ||
+      ((partial.livekit as Partial<LiveKitConfig>).apiSecret !== undefined));
 
   // Strip redacted placeholders so they don't overwrite real values
   if (partial.jwtSecret === REDACTED) {
@@ -548,6 +563,11 @@ export function updateConfig(
   }
 
   const updated: ServerConfig = deepMerge(config, partial);
+  if (livekitCredentialsSubmitted) {
+    requiresLivekitRestart =
+      updated.livekit.apiKey !== config.livekit.apiKey ||
+      updated.livekit.apiSecret !== config.livekit.apiSecret;
+  }
 
   const configPath = getConfigPath();
   try {
@@ -560,5 +580,5 @@ export function updateConfig(
   }
 
   config = updated;
-  return { config: updated, requiresRestart };
+  return { config: updated, requiresRestart, requiresLivekitRestart };
 }

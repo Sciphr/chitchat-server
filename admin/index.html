@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -8,30 +8,50 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg-primary: #1a1a2e;
-      --bg-secondary: #16213e;
-      --bg-card: #1e2a47;
-      --bg-input: #0f1629;
-      --border: #2a3a5c;
-      --text-primary: #e0e0e0;
-      --text-secondary: #8892a4;
-      --text-muted: #5a6478;
-      --accent: #4f8cff;
-      --accent-hover: #3a75e6;
-      --danger: #e74c5f;
-      --danger-hover: #cf3a4e;
-      --success: #4caf7d;
-      --warning: #e6a23c;
-      --online: #4caf7d;
-      --radius: 8px;
-      --shadow: 0 2px 12px rgba(0,0,0,0.3);
+      --bg-primary: #09131a;
+      --bg-secondary: rgba(11, 24, 33, 0.92);
+      --bg-card: rgba(18, 34, 45, 0.88);
+      --bg-input: #08131a;
+      --border: rgba(142, 176, 193, 0.14);
+      --border-strong: rgba(142, 176, 193, 0.24);
+      --text-primary: #ecf4f7;
+      --text-secondary: #a8beca;
+      --text-muted: #708894;
+      --accent: #40b0ff;
+      --accent-hover: #2696e5;
+      --accent-soft: rgba(64, 176, 255, 0.16);
+      --danger: #ff6b7f;
+      --danger-hover: #e05a6d;
+      --success: #57c69a;
+      --warning: #ffc45c;
+      --online: #57c69a;
+      --radius: 12px;
+      --radius-lg: 18px;
+      --shadow: 0 24px 60px rgba(0,0,0,0.34);
+      --shadow-soft: 0 12px 30px rgba(0,0,0,0.22);
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: var(--bg-primary);
+      font-family: "Aptos", "Segoe UI Variable", "Trebuchet MS", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(64,176,255,0.13), transparent 30%),
+        radial-gradient(circle at top right, rgba(255,196,92,0.12), transparent 24%),
+        linear-gradient(180deg, #071017 0%, #0b1720 42%, #10202a 100%);
       color: var(--text-primary);
       min-height: 100vh;
+      position: relative;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+      background-size: 32px 32px;
+      mask-image: linear-gradient(180deg, rgba(0,0,0,0.4), transparent 85%);
+      opacity: 0.35;
     }
 
     /* Login */
@@ -42,12 +62,13 @@
       min-height: 100vh;
     }
     .login-box {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: 12px;
+      background: linear-gradient(180deg, rgba(12,24,33,0.96), rgba(10,19,27,0.92));
+      border: 1px solid var(--border-strong);
+      border-radius: 22px;
       padding: 40px;
       width: 380px;
       box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
     }
     .login-box h1 {
       font-size: 22px;
@@ -121,17 +142,20 @@
     }
     input[type="text"], input[type="password"], input[type="email"], input[type="number"], select, textarea {
       width: 100%;
-      padding: 10px 12px;
-      background: var(--bg-input);
+      padding: 11px 13px;
+      background: linear-gradient(180deg, rgba(6,14,19,0.88), rgba(8,19,26,0.98));
       border: 1px solid var(--border);
       border-radius: var(--radius);
       color: var(--text-primary);
       font-size: 14px;
       outline: none;
-      transition: border-color 0.2s;
+      min-height: 42px;
+      transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
     }
     input:focus, select:focus, textarea:focus {
       border-color: var(--accent);
+      box-shadow: 0 0 0 4px rgba(64,176,255,0.12);
     }
     textarea { resize: vertical; min-height: 60px; font-family: monospace; }
     .field { margin-bottom: 16px; }
@@ -208,59 +232,65 @@
     .btn {
       padding: 10px 20px;
       border: none;
-      border-radius: var(--radius);
+      border-radius: 999px;
       font-size: 14px;
-      font-weight: 500;
+      font-weight: 600;
       cursor: pointer;
-      transition: background 0.2s;
+      transition: background 0.2s, transform 0.2s, box-shadow 0.2s;
+      box-shadow: var(--shadow-soft);
     }
-    .btn-primary { background: var(--accent); color: #fff; }
-    .btn-primary:hover { background: var(--accent-hover); }
-    .btn-danger { background: var(--danger); color: #fff; }
-    .btn-danger:hover { background: var(--danger-hover); }
+    .btn:hover { transform: translateY(-1px); }
+    .btn-primary { background: linear-gradient(135deg, var(--accent), #1f82cc); color: #fff; }
+    .btn-primary:hover { background: linear-gradient(135deg, var(--accent-hover), #1b72ba); }
+    .btn-danger { background: linear-gradient(135deg, var(--danger), #ca4960); color: #fff; }
+    .btn-danger:hover { background: linear-gradient(135deg, var(--danger-hover), #bc4459); }
     .btn-sm { padding: 6px 14px; font-size: 13px; }
     .btn-full { width: 100%; }
     .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
     /* Shell */
-    .shell { display: flex; height: 100vh; }
+    .shell { display: flex; min-height: 100vh; }
 
     /* Sidebar */
     .sidebar {
-      width: 220px;
-      background: var(--bg-secondary);
-      border-right: 1px solid var(--border);
+      width: 248px;
+      background: linear-gradient(180deg, rgba(11,24,33,0.97), rgba(8,18,24,0.93));
+      border-right: 1px solid var(--border-strong);
       display: flex;
       flex-direction: column;
       flex-shrink: 0;
+      backdrop-filter: blur(20px);
     }
     .sidebar-brand {
-      padding: 20px;
-      font-size: 17px;
+      padding: 24px 22px;
+      font-size: 18px;
       font-weight: 700;
+      letter-spacing: -0.02em;
       border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
       gap: 8px;
     }
     .sidebar-brand svg { flex-shrink: 0; }
-    .sidebar-nav { flex: 1; padding: 12px 0; }
+    .sidebar-nav { flex: 1; padding: 16px 14px; display: flex; flex-direction: column; gap: 6px; }
     .nav-item {
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 10px 20px;
+      padding: 12px 14px;
       font-size: 14px;
       color: var(--text-secondary);
       cursor: pointer;
       transition: all 0.15s;
-      border-left: 3px solid transparent;
+      border: 1px solid transparent;
+      border-radius: 14px;
     }
-    .nav-item:hover { color: var(--text-primary); background: rgba(79,140,255,0.06); }
+    .nav-item:hover { color: var(--text-primary); background: rgba(255,255,255,0.03); border-color: rgba(64,176,255,0.12); }
     .nav-item.active {
-      color: var(--accent);
-      background: rgba(79,140,255,0.1);
-      border-left-color: var(--accent);
+      color: var(--text-primary);
+      background: linear-gradient(90deg, rgba(64,176,255,0.18), rgba(64,176,255,0.08));
+      border-color: rgba(64,176,255,0.22);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
     }
     .sidebar-footer {
       padding: 16px 20px;
@@ -275,8 +305,13 @@
     .sidebar-footer a:hover { text-decoration: underline; }
 
     /* Content */
-    .content { flex: 1; overflow-y: auto; padding: 28px 36px; }
-    .content h2 { font-size: 20px; margin-bottom: 20px; }
+    .content { flex: 1; overflow-y: auto; padding: 34px 40px 52px; }
+    .content h2 { font-size: 30px; letter-spacing: -0.03em; margin-bottom: 24px; }
+    .page { max-width: 1440px; animation: pageIn 0.22s ease; }
+    @keyframes pageIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
 
     /* Responsive table wrapper */
     .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -289,22 +324,37 @@
       margin-bottom: 28px;
     }
     .stat-card {
-      background: var(--bg-card);
+      background: linear-gradient(180deg, rgba(20,37,48,0.92), rgba(16,30,40,0.86));
       border: 1px solid var(--border);
-      border-radius: var(--radius);
+      border-radius: 16px;
       padding: 20px;
+      box-shadow: var(--shadow-soft);
+      position: relative;
+      overflow: hidden;
+    }
+    .stat-card::after,
+    .card::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(circle at top right, rgba(64,176,255,0.12), transparent 34%);
     }
     .stat-card .label { font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; }
-    .stat-card .value { font-size: 28px; font-weight: 700; }
+    .stat-card .value { font-size: 30px; font-weight: 700; letter-spacing: -0.04em; }
 
     .card {
-      background: var(--bg-card);
+      background: linear-gradient(180deg, rgba(20,37,48,0.92), rgba(14,27,36,0.9));
       border: 1px solid var(--border);
-      border-radius: var(--radius);
+      border-radius: var(--radius-lg);
       padding: 24px;
       margin-bottom: 20px;
+      box-shadow: var(--shadow-soft);
+      backdrop-filter: blur(12px);
+      position: relative;
+      overflow: hidden;
     }
-    .card h3 { font-size: 16px; margin-bottom: 16px; }
+    .card h3 { font-size: 17px; letter-spacing: -0.02em; margin-bottom: 16px; }
 
     /* Table */
     table {
@@ -475,13 +525,16 @@
       position: sticky;
       bottom: 0;
       z-index: 20;
-      background: var(--bg-secondary);
-      border-top: 1px solid var(--border);
-      padding: 14px 0;
+      background: linear-gradient(180deg, rgba(10,19,27,0.82), rgba(10,19,27,0.96));
+      border: 1px solid var(--border-strong);
+      border-radius: 18px;
+      padding: 14px 16px;
       margin-top: 20px;
       display: flex;
       align-items: center;
       gap: 12px;
+      box-shadow: var(--shadow-soft);
+      backdrop-filter: blur(16px);
     }
 
     .restart-banner {
@@ -492,6 +545,41 @@
       border-radius: var(--radius);
       margin-bottom: 20px;
       font-size: 14px;
+    }
+
+    @media (max-width: 980px) {
+      .shell { flex-direction: column; }
+      .sidebar {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid var(--border-strong);
+      }
+      .sidebar-nav {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .content { padding: 24px 18px 36px; }
+      .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .backup-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 640px) {
+      .login-box {
+        width: min(92vw, 420px);
+        padding: 30px 22px;
+      }
+      .sidebar-nav { grid-template-columns: 1fr; }
+      .stats-grid { grid-template-columns: 1fr; }
+      .actions-bar { flex-wrap: wrap; }
+      .inline-field {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+      }
+      .sticky-save-bar {
+        flex-direction: column;
+        align-items: stretch;
+      }
     }
   </style>
 </head>
@@ -677,7 +765,7 @@
         <div class="field">
           <label for="cfg-port">Port</label>
           <input type="number" id="cfg-port" min="1" max="65535">
-          <div class="field-hint">Requires restart</div>
+          <div class="field-hint">Requires restart. In Docker or Portainer, also update the published host port mapping if you change this.</div>
         </div>
         <div class="field">
           <label for="cfg-maxUsers">Max Users (0 = unlimited)</label>
@@ -762,23 +850,23 @@
         <div class="field">
           <label for="cfg-lk-apiKey">API Key</label>
           <input type="text" id="cfg-lk-apiKey" placeholder="APIxxxxxxxxxxxx">
-          <div class="field-hint">LiveKit API key. Shown redacted — enter a new value to change it.</div>
+          <div class="field-hint">LiveKit API key. Shown redacted - enter a new value to change it.</div>
         </div>
         <div class="field">
           <label for="cfg-lk-apiSecret">API Secret</label>
           <input type="text" id="cfg-lk-apiSecret" placeholder="secret">
-          <div class="field-hint">LiveKit API secret. Shown redacted — enter a new value to change it.</div>
+          <div class="field-hint">LiveKit API secret. Shown redacted - enter a new value to change it.</div>
           <div class="field-hint" style="color: var(--color-warning, #f59e0b); margin-top: 6px;">
-            If running LiveKit via Docker, changing the API key or secret here also requires updating <code>LIVEKIT_API_KEY</code> and <code>LIVEKIT_API_SECRET</code> in your Docker environment and restarting the LiveKit container — otherwise voice will stop working.
+            LiveKit credentials saved here persist across updates. Restart the LiveKit container or service after saving so the running media server picks up the new values.
           </div>
         </div>
         <div class="field">
           <label for="cfg-lk-maxScreenRes">Max Screen Share Resolution</label>
           <select id="cfg-lk-maxScreenRes">
-            <option value="720p">720p (1280×720)</option>
-            <option value="1080p">1080p (1920×1080)</option>
-            <option value="1440p">1440p (2560×1440)</option>
-            <option value="4k">4K (3840×2160)</option>
+            <option value="720p">720p (1280x720)</option>
+            <option value="1080p">1080p (1920x1080)</option>
+            <option value="1440p">1440p (2560x1440)</option>
+            <option value="4k">4K (3840x2160)</option>
           </select>
         </div>
         <div class="field">
@@ -804,7 +892,7 @@
         <div class="field">
           <label for="cfg-files-maxUploadSizeMB">Max Upload Size (MB)</label>
           <input type="number" id="cfg-files-maxUploadSizeMB" min="1" max="1024">
-          <div class="field-hint">Maximum file size per upload (1–1024 MB)</div>
+          <div class="field-hint">Maximum file size per upload (1-1024 MB)</div>
         </div>
         <div class="inline-field">
           <label>Strip image metadata from uploads <span class="tip" tabindex="0" data-tip="Removes metadata (EXIF/text/XMP where applicable) from JPEG, PNG, and WebP uploads before storing. This is privacy hardening, not malware scanning.">?</span></label>
@@ -1288,7 +1376,7 @@
       <h2>Diagnostics</h2>
       <div class="actions-bar">
         <button class="btn btn-primary btn-sm" id="diagnostics-run-btn">Run All Checks</button>
-        <span class="muted" id="diagnostics-last-run">Not yet run — click to check service connectivity.</span>
+        <span class="muted" id="diagnostics-last-run">Not yet run - click to check service connectivity.</span>
       </div>
 
       <div class="card" id="diag-livekit-card">
@@ -1828,14 +1916,22 @@
       if (result.requiresRestart && result.requiresRestart.length > 0) {
         $('#restart-banner').classList.remove('hidden');
       }
+      const saveMessages = [];
       if (result.storageMigration) {
         const moved = Number(result.storageMigration.movedFiles || 0);
         const already = Number(result.storageMigration.alreadyPresent || 0);
         const missing = Number(result.storageMigration.missingSource || 0);
-        toast(`Configuration saved. Storage migration: moved ${moved}, already present ${already}, missing ${missing}.`);
-      } else {
-        toast('Configuration saved');
+        saveMessages.push(`Storage migration: moved ${moved}, already present ${already}, missing ${missing}.`);
       }
+      if (result.requiresLivekitRestart) {
+        saveMessages.push('Restart the LiveKit container or service to apply the new media credentials.');
+      }
+      toast(
+        saveMessages.length > 0
+          ? `Configuration saved. ${saveMessages.join(' ')}`
+          : 'Configuration saved',
+        result.requiresLivekitRestart ? 'warning' : 'success'
+      );
     } catch (err) {
       toast(err.message, 'error');
     }
@@ -1859,10 +1955,10 @@
       const result = await api('GET', '/api/admin/antivirus/test');
       const loc = result.socketPath ? result.socketPath : `${result.host}:${result.port}`;
       if (result.ok) {
-        $('#files-av-status').textContent = `Scanner reachable (${loc}) — ${result.detail}`;
+        $('#files-av-status').textContent = `Scanner reachable (${loc}) - ${result.detail}`;
         $('#files-av-status').style.color = 'var(--success)';
       } else {
-        $('#files-av-status').textContent = `Scanner check failed (${loc}) — ${result.detail}`;
+        $('#files-av-status').textContent = `Scanner check failed (${loc}) - ${result.detail}`;
         $('#files-av-status').style.color = 'var(--danger)';
       }
     } catch (err) {
@@ -1877,7 +1973,7 @@
       const steps = [
         { label: '1. Install ClamAV', cmd: help.installCommand },
         { label: '2. Enable and start the service', cmd: help.enableServiceCommand },
-        { label: '3. In Admin → Configuration → File Storage, enable scanning and set Unix Socket Path to:', cmd: '/run/clamav/clamd.ctl' },
+        { label: '3. In Admin > Configuration > File Storage, enable scanning and set Unix Socket Path to:', cmd: '/run/clamav/clamd.ctl' },
         { label: '4. Save and test the connection in the Diagnostics page.', cmd: null },
       ];
       $('#av-install-content').innerHTML = steps.map(s => `
@@ -1900,7 +1996,7 @@
       error:    { bg: 'rgba(231,76,95,0.15)',   color: 'var(--danger)',   text: 'Failed' },
       disabled: { bg: 'var(--bg-input)',         color: 'var(--text-muted)', text: 'Disabled' },
       idle:     { bg: 'var(--bg-input)',         color: 'var(--text-muted)', text: 'Not checked' },
-      checking: { bg: 'rgba(79,140,255,0.12)',  color: 'var(--accent)',   text: 'Checking…' },
+      checking: { bg: 'rgba(79,140,255,0.12)',  color: 'var(--accent)',   text: 'Checking...' },
     };
     const s = styles[state] || styles.idle;
     el.textContent = s.text;
@@ -1926,7 +2022,7 @@
       $(`#diag-${s}-detail`).style.display = 'none';
       if ($(`#diag-${s}-warnings`)) $(`#diag-${s}-warnings`).innerHTML = '';
     });
-    $('#diagnostics-last-run').textContent = 'Running checks…';
+    $('#diagnostics-last-run').textContent = 'Running checks...';
 
     try {
       const d = await api('GET', '/api/admin/diagnostics');
@@ -1935,7 +2031,7 @@
       const lk = d.livekit;
       if (!lk.configured) {
         diagBadge('diag-livekit-badge', 'error');
-        $(`#diag-livekit-meta`).textContent = 'Not configured — voice and video will not work.';
+        $(`#diag-livekit-meta`).textContent = 'Not configured - voice and video will not work.';
         diagDetail('diag-livekit', lk.detail, 'var(--danger)');
       } else if (lk.ok && lk.warnings.length === 0) {
         diagBadge('diag-livekit-badge', 'ok');
@@ -1952,16 +2048,16 @@
       }
       if (lk.warnings && lk.warnings.length > 0) {
         $(`#diag-livekit-warnings`).innerHTML = lk.warnings.map(w =>
-          `<div style="margin-top:6px;padding:8px 12px;background:rgba(230,162,60,0.1);border:1px solid rgba(230,162,60,0.3);border-radius:6px;font-size:12px;color:var(--warning)">⚠ ${esc(w)}</div>`
+          `<div style="margin-top:6px;padding:8px 12px;background:rgba(230,162,60,0.1);border:1px solid rgba(230,162,60,0.3);border-radius:6px;font-size:12px;color:var(--warning)">Warning: ${esc(w)}</div>`
         ).join('');
       }
 
       // SMTP
       const sm = d.smtp;
-      const smtpMeta = sm.configured ? `${sm.user || ''} → ${sm.host}:${sm.port}` : '';
+      const smtpMeta = sm.configured ? `${sm.user || ''} -> ${sm.host}:${sm.port}` : '';
       if (!sm.configured) {
         diagBadge('diag-smtp-badge', 'disabled');
-        $(`#diag-smtp-meta`).textContent = 'Not configured — password reset emails are disabled.';
+        $(`#diag-smtp-meta`).textContent = 'Not configured - password reset emails are disabled.';
         diagDetail('diag-smtp', sm.detail, 'var(--text-muted)');
       } else if (sm.ok) {
         diagBadge('diag-smtp-badge', 'ok');
@@ -1977,7 +2073,7 @@
       const av = d.antivirus;
       if (!av.enabled) {
         diagBadge('diag-av-badge', 'disabled');
-        $(`#diag-av-meta`).textContent = 'Antivirus scanning is disabled — uploaded files are not scanned.';
+        $(`#diag-av-meta`).textContent = 'Antivirus scanning is disabled - uploaded files are not scanned.';
         diagDetail('diag-av', null, null);
       } else if (av.ok) {
         diagBadge('diag-av-badge', 'ok');
@@ -2464,7 +2560,7 @@
 
   function getAuditSortIcon(column) {
     if (auditState.sortBy !== column) return '';
-    return auditState.sortDir === 'ASC' ? ' ↑' : ' ↓';
+    return auditState.sortDir === 'ASC' ? ' ^' : ' v';
   }
 
   function updateAuditSortHeaders() {

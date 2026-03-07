@@ -28,16 +28,69 @@ services:
   livekit:
     image: livekit/livekit-server:latest
     restart: unless-stopped
-    command: ["--config", "/etc/livekit.yaml"]
+    entrypoint: ["/bin/sh", "-c"]
     environment:
-      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-}
+      LIVEKIT_PORT: ${LIVEKIT_PORT:-7880}
+      LIVEKIT_UDP_PORT_START: ${LIVEKIT_UDP_PORT_START:-50000}
+      LIVEKIT_UDP_PORT_END: ${LIVEKIT_UDP_PORT_END:-50100}
+    command:
+      - |
+        set -eu
+        RUNTIME_CFG=/tmp/livekit.yaml
+        BASE_CFG=/etc/livekit-base.yaml
+        DATA_CFG=/app/data/config.json
+
+        extract_livekit_value() {
+          key="$$1"
+          if [ ! -r "$$DATA_CFG" ]; then
+            return 0
+          fi
+          sed -n '/"livekit"[[:space:]]*:[[:space:]]*{/,/^[[:space:]]*}[,]*[[:space:]]*$$/p' "$$DATA_CFG" \
+            | sed -n "s/.*\"$$key\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" \
+            | head -n 1
+        }
+
+        if [ -f "$$BASE_CFG" ]; then
+          awk '
+            BEGIN { skip = 0 }
+            /^[[:space:]]*keys:[[:space:]]*$$/ { skip = 1; next }
+            skip && /^[^[:space:]]/ { skip = 0 }
+            !skip { print }
+          ' "$$BASE_CFG" > "$$RUNTIME_CFG"
+        else
+          cat > "$$RUNTIME_CFG" <<EOF
+        port: $${LIVEKIT_PORT}
+        rtc:
+          port_range_start: $${LIVEKIT_UDP_PORT_START}
+          port_range_end: $${LIVEKIT_UDP_PORT_END}
+          use_external_ip: true
+        logging:
+          level: info
+        EOF
+        fi
+
+        LK_API_KEY="$$(extract_livekit_value apiKey)"
+        LK_API_SECRET="$$(extract_livekit_value apiSecret)"
+        if [ -z "$$LK_API_KEY" ]; then LK_API_KEY="$${LIVEKIT_API_KEY:-}"; fi
+        if [ -z "$$LK_API_SECRET" ]; then LK_API_SECRET="$${LIVEKIT_API_SECRET:-}"; fi
+
+        if [ -n "$$LK_API_KEY" ] && [ -n "$$LK_API_SECRET" ]; then
+          LK_API_KEY_ESCAPED="$$(printf '%s' "$$LK_API_KEY" | sed 's/[\"\\]/\\&/g')"
+          LK_API_SECRET_ESCAPED="$$(printf '%s' "$$LK_API_SECRET" | sed 's/[\"\\]/\\&/g')"
+          printf 'keys:\n  "%s": "%s"\n' "$$LK_API_KEY_ESCAPED" "$$LK_API_SECRET_ESCAPED" >> "$$RUNTIME_CFG"
+        fi
+
+        exec livekit-server --config "$$RUNTIME_CFG"
     ports:
       - "${LIVEKIT_PORT:-7880}:7880/tcp"
       - "${LIVEKIT_UDP_PORT_START:-50000}-${LIVEKIT_UDP_PORT_END:-50100}:${LIVEKIT_UDP_PORT_START:-50000}-${LIVEKIT_UDP_PORT_END:-50100}/udp"
       - "3478:3478/udp"
       - "5349:5349/tcp"
     volumes:
-      - ./deploy/livekit/livekit.yaml:/etc/livekit.yaml:ro
+      - chitchat_data:/app/data
+      - ./deploy/livekit/livekit.yaml:/etc/livekit-base.yaml:ro
 
 volumes:
   chitchat_data:

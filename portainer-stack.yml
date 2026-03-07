@@ -7,12 +7,12 @@
 #   4. Click "Deploy the stack"
 #
 # POST-DEPLOY STEPS:
-#   - Log in to the ChitChat Admin UI and go to Admin → Security
-#   - Enable "Trust Reverse Proxy" (required when running behind Nginx Proxy Manager)
+#   - Log in to the ChitChat Admin UI and go to Admin > Security
+#   - Enable "Trust Reverse Proxy" if you are running behind Nginx Proxy Manager
 #
-# IMPORTANT: LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be identical
-# in BOTH the `chitchat` and `livekit` services below. Change them
-# together, and use a long random string for each.
+# IMPORTANT: LIVEKIT_API_KEY and LIVEKIT_API_SECRET seed the initial
+# persisted config and are used as fallback if no saved config exists.
+# Change them to long random strings before first deploy.
 
 services:
 
@@ -29,12 +29,11 @@ services:
       JWT_SECRET: "change-me-to-a-long-random-secret"   # <-- CHANGE THIS
 
       # -- LiveKit (must match the livekit service below) -------------------
-      # Set this to your public LiveKit URL (must be wss:// for HTTPS deployments).
-      # IMPORTANT: This env var ALWAYS overrides the Admin UI setting on every
-      # redeploy. If you change the URL in the Admin UI it will be reset when
-      # you redeploy the stack. Either keep the correct URL here, or remove
-      # this line entirely to manage the LiveKit URL from the Admin UI only.
-      LIVEKIT_URL: "wss://livekit.example.com"           # <-- CHANGE THIS
+      # Leave this as-is for direct IP/hostname installs. Clients will
+      # automatically use the same host they used for ChitChat on port 7880.
+      # Only change this if you are using HTTPS/reverse proxy or a separate
+      # public LiveKit host, in which case it should be a public wss:// URL.
+      LIVEKIT_URL: "ws://livekit:7880"
       LIVEKIT_API_KEY: "devkey"                          # <-- CHANGE THIS
       LIVEKIT_API_SECRET: "devsecret"                    # <-- CHANGE THIS
 
@@ -77,29 +76,32 @@ services:
       - chitchat_data:/app/data
       # Required only if antivirus is enabled and ClamAV is installed on the host.
       # This bind-mounts the host's ClamAV Unix socket into the container so
-      # chitchat can reach it. Remove this line if you don't use ClamAV.
+      # chitchat can reach it. Remove this line if you do not use ClamAV.
       - /run/clamav/clamd.ctl:/run/clamav/clamd.ctl
 
   livekit:
     image: livekit/livekit-server:latest
     restart: unless-stopped
-    # --dev enables development mode (no TLS required); --bind 0.0.0.0 ensures
-    # the server listens on all interfaces inside the container.
-    # API keys are set via the LIVEKIT_KEYS env var below — no config file needed.
-    command: --dev --bind 0.0.0.0
+    # The runtime config is assembled at container start. Saved ChitChat config
+    # in /app/data/config.json takes priority so Admin UI credential changes
+    # persist across updates. The env values below are bootstrap/fallback only.
+    entrypoint: ["/bin/sh", "-c"]
     environment:
-      # Format is  "key: secret"  -- must match chitchat's LIVEKIT_API_KEY / LIVEKIT_API_SECRET above
-      LIVEKIT_KEYS: "devkey: devsecret"                  # <-- CHANGE THIS
+      LIVEKIT_API_KEY: "devkey"                          # <-- CHANGE THIS
+      LIVEKIT_API_SECRET: "devsecret"                    # <-- CHANGE THIS
 
       # -- RTC port range (required for voice to work) ----------------------
       # This locks LiveKit to ports 50000-50100 so they match the Docker port
       # mapping above. Without this, LiveKit uses random ports that are
       # unreachable and voice connections will always fail.
       LIVEKIT_CONFIG: |
+        port: 7880
         rtc:
           port_range_start: 50000
           port_range_end: 50100
           use_external_ip: true
+        logging:
+          level: info
 
         # -- TURN relay (optional, for users behind strict firewalls/NAT) ---
         # Requires a domain with a valid TLS certificate pointing to this server.
@@ -110,11 +112,62 @@ services:
         #   tls_port: 5349
         #   udp_port: 3478
         #   external_tls: false
+    command:
+      - |
+        set -eu
+        BASE_CFG=/tmp/livekit-base.yaml
+        RUNTIME_CFG=/tmp/livekit.yaml
+        DATA_CFG=/app/data/config.json
+
+        extract_livekit_value() {
+          key="$$1"
+          if [ ! -r "$$DATA_CFG" ]; then
+            return 0
+          fi
+          sed -n '/"livekit"[[:space:]]*:[[:space:]]*{/,/^[[:space:]]*}[,]*[[:space:]]*$$/p' "$$DATA_CFG" \
+            | sed -n "s/.*\"$$key\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" \
+            | head -n 1
+        }
+
+        printf '%s\n' "$${LIVEKIT_CONFIG:-}" > "$$BASE_CFG"
+        if [ -s "$$BASE_CFG" ]; then
+          awk '
+            BEGIN { skip = 0 }
+            /^[[:space:]]*keys:[[:space:]]*$$/ { skip = 1; next }
+            skip && /^[^[:space:]]/ { skip = 0 }
+            !skip { print }
+          ' "$$BASE_CFG" > "$$RUNTIME_CFG"
+        else
+          cat > "$$RUNTIME_CFG" <<EOF
+        port: 7880
+        rtc:
+          port_range_start: 50000
+          port_range_end: 50100
+          use_external_ip: true
+        logging:
+          level: info
+        EOF
+        fi
+
+        LK_API_KEY="$$(extract_livekit_value apiKey)"
+        LK_API_SECRET="$$(extract_livekit_value apiSecret)"
+        if [ -z "$$LK_API_KEY" ]; then LK_API_KEY="$${LIVEKIT_API_KEY:-}"; fi
+        if [ -z "$$LK_API_SECRET" ]; then LK_API_SECRET="$${LIVEKIT_API_SECRET:-}"; fi
+
+        if [ -n "$$LK_API_KEY" ] && [ -n "$$LK_API_SECRET" ]; then
+          LK_API_KEY_ESCAPED="$$(printf '%s' "$$LK_API_KEY" | sed 's/[\"\\]/\\&/g')"
+          LK_API_SECRET_ESCAPED="$$(printf '%s' "$$LK_API_SECRET" | sed 's/[\"\\]/\\&/g')"
+          printf 'keys:\n  "%s": "%s"\n' "$$LK_API_KEY_ESCAPED" "$$LK_API_SECRET_ESCAPED" >> "$$RUNTIME_CFG"
+        fi
+
+        exec livekit-server --config "$$RUNTIME_CFG"
     ports:
       - "7880:7880/tcp"
       - "50000-50100:50000-50100/udp"
       - "3478:3478/udp"
       - "5349:5349/tcp"
+    volumes:
+      - chitchat_data:/app/data
 
 volumes:
   chitchat_data:
