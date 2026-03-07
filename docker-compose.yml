@@ -62,6 +62,8 @@ services:
         else
           cat > "$$RUNTIME_CFG" <<EOF
         port: $${LIVEKIT_PORT}
+        bind_addresses:
+          - "0.0.0.0"
         rtc:
           port_range_start: $${LIVEKIT_UDP_PORT_START}
           port_range_end: $${LIVEKIT_UDP_PORT_END}

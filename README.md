@@ -162,6 +162,8 @@ services:
       LIVEKIT_API_SECRET: "devsecret" # <-- CHANGE THIS
       LIVEKIT_CONFIG: |
         port: 7880
+        bind_addresses:
+          - "0.0.0.0"
         rtc:
           port_range_start: 50000
           port_range_end: 50100
@@ -206,6 +208,8 @@ services:
         else
           cat > "$$RUNTIME_CFG" <<EOF
         port: 7880
+        bind_addresses:
+          - "0.0.0.0"
         rtc:
           port_range_start: 50000
           port_range_end: 50100
