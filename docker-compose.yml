@@ -84,7 +84,7 @@ services:
           printf 'keys:\n  "%s": "%s"\n' "$$LK_API_KEY_ESCAPED" "$$LK_API_SECRET_ESCAPED" >> "$$RUNTIME_CFG"
         fi
 
-        exec livekit-server --config "$$RUNTIME_CFG"
+        exec /livekit-server --config "$$RUNTIME_CFG"
     ports:
       - "${LIVEKIT_PORT:-7880}:7880/tcp"
       - "${LIVEKIT_UDP_PORT_START:-50000}-${LIVEKIT_UDP_PORT_END:-50100}:${LIVEKIT_UDP_PORT_START:-50000}-${LIVEKIT_UDP_PORT_END:-50100}/udp"

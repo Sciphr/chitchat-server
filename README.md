@@ -160,7 +160,7 @@ services:
     environment:
       LIVEKIT_API_KEY: "devkey" # <-- CHANGE THIS
       LIVEKIT_API_SECRET: "devsecret" # <-- CHANGE THIS
-      LIVEKIT_CONFIG: |
+      LIVEKIT_BASE_CONFIG: |
         port: 7880
         bind_addresses:
           - "0.0.0.0"
@@ -197,7 +197,7 @@ services:
             | head -n 1
         }
 
-        printf '%s\n' "$${LIVEKIT_CONFIG:-}" > "$$BASE_CFG"
+        printf '%s\n' "$${LIVEKIT_BASE_CONFIG:-}" > "$$BASE_CFG"
         if [ -s "$$BASE_CFG" ]; then
           awk '
             BEGIN { skip = 0 }
@@ -229,7 +229,8 @@ services:
           printf 'keys:\n  "%s": "%s"\n' "$$LK_API_KEY_ESCAPED" "$$LK_API_SECRET_ESCAPED" >> "$$RUNTIME_CFG"
         fi
 
-        exec livekit-server --config "$$RUNTIME_CFG"
+        unset LIVEKIT_CONFIG LIVEKIT_KEYS LIVEKIT_KEY_FILE
+        exec /livekit-server --config "$$RUNTIME_CFG"
     ports:
       - "7880:7880/tcp"
       - "50000-50100:50000-50100/udp"
