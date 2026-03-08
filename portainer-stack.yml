@@ -101,6 +101,7 @@ services:
         rtc:
           port_range_start: 50000
           port_range_end: 50100
+          tcp_port: 7881
           use_external_ip: true
         logging:
           level: info
@@ -147,6 +148,7 @@ services:
         rtc:
           port_range_start: 50000
           port_range_end: 50100
+          tcp_port: 7881
           use_external_ip: true
         logging:
           level: info
@@ -168,6 +170,7 @@ services:
         exec /livekit-server --config "$$RUNTIME_CFG"
     ports:
       - "7880:7880/tcp"
+      - "7881:7881/tcp"
       - "50000-50100:50000-50100/udp"
       - "3478:3478/udp"
       - "5349:5349/tcp"

@@ -417,8 +417,14 @@ router.post("/login", (req, res) => {
     return;
   }
 
-  // Set user online on login
+  // Set user online on login and record client version if provided
   db.prepare("UPDATE users SET status = 'online', activity_game = NULL WHERE id = ?").run(user.id);
+  const clientVersion = typeof req.headers["x-client-version"] === "string"
+    ? req.headers["x-client-version"]
+    : null;
+  if (clientVersion) {
+    db.prepare("UPDATE users SET last_client_version = ? WHERE id = ?").run(clientVersion, user.id);
+  }
 
   const token = generateToken({
     userId: user.id,
@@ -601,6 +607,12 @@ router.post("/login/2fa", async (req, res) => {
 
   const isAdmin = payload.isAdmin;
   db.prepare("UPDATE users SET status = 'online', activity_game = NULL WHERE id = ?").run(user.id);
+  const clientVersion2fa = typeof req.headers["x-client-version"] === "string"
+    ? req.headers["x-client-version"]
+    : null;
+  if (clientVersion2fa) {
+    db.prepare("UPDATE users SET last_client_version = ? WHERE id = ?").run(clientVersion2fa, user.id);
+  }
   const token = generateToken({
     userId: user.id,
     username: user.username,

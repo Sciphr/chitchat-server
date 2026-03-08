@@ -709,7 +709,7 @@ router.get("/users", requireAuth, requireAdmin, (_req, res) => {
   const db = getDb();
   const users = db
     .prepare(
-      `SELECT id, username, email, avatar_url, about, status, created_at, updated_at
+      `SELECT id, username, email, avatar_url, about, status, last_client_version, created_at, updated_at
        FROM users ORDER BY created_at DESC`
     )
     .all();

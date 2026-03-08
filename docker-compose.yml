@@ -67,6 +67,7 @@ services:
         rtc:
           port_range_start: $${LIVEKIT_UDP_PORT_START}
           port_range_end: $${LIVEKIT_UDP_PORT_END}
+          tcp_port: 7881
           use_external_ip: true
         logging:
           level: info
@@ -87,6 +88,7 @@ services:
         exec /livekit-server --config "$$RUNTIME_CFG"
     ports:
       - "${LIVEKIT_PORT:-7880}:7880/tcp"
+      - "7881:7881/tcp"
       - "${LIVEKIT_UDP_PORT_START:-50000}-${LIVEKIT_UDP_PORT_END:-50100}:${LIVEKIT_UDP_PORT_START:-50000}-${LIVEKIT_UDP_PORT_END:-50100}/udp"
       - "3478:3478/udp"
       - "5349:5349/tcp"

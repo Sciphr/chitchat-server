@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS users (
   two_factor_pending_secret TEXT,
   two_factor_pending_expires_at TEXT,
   activity_game TEXT,
+  last_client_version TEXT,
   is_setup_account INTEGER NOT NULL DEFAULT 0,
   status TEXT DEFAULT 'offline' CHECK (status IN ('online', 'offline', 'away', 'dnd')),
   created_at TEXT DEFAULT (datetime('now')),
@@ -483,6 +484,12 @@ export const MIGRATIONS: Array<{ name: string; sql: string }> = [
     name: "009_setup_account_flag",
     sql: `
       ALTER TABLE users ADD COLUMN is_setup_account INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
+    name: "010_last_client_version",
+    sql: `
+      ALTER TABLE users ADD COLUMN last_client_version TEXT;
     `,
   },
 ];
