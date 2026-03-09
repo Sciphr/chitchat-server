@@ -2239,27 +2239,6 @@ export function setupSocketHandlers(io: Server) {
             }
           }
 
-          // For DM rooms, also notify the other participant directly
-          // (they may not have joined the Socket.io room yet)
-          if (roomInfo?.type === "dm") {
-            const otherMember = db
-              .prepare(
-                "SELECT user_id FROM room_members WHERE room_id = ? AND user_id != ?"
-              )
-              .get(room_id, userId) as { user_id: string } | undefined;
-            if (otherMember) {
-              for (const [sid, cu] of connectedUsers.entries()) {
-                if (cu.userId === otherMember.user_id) {
-                  const otherSocket = io.sockets.sockets.get(sid);
-                  // Only send if they haven't already joined this room
-                  if (otherSocket && !otherSocket.rooms.has(room_id)) {
-                    otherSocket.emit("message:new", payloadWithMeta);
-                  }
-                }
-              }
-            }
-          }
-
           if (ack) {
             ack({ ok: true, message: payloadWithMeta, client_nonce });
           }

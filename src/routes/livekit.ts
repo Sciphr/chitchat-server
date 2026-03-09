@@ -20,6 +20,7 @@ router.post("/token", requireAuth, async (req, res) => {
   const { room, username } = req.body as {
     room?: string;
     username?: string;
+    purpose?: "voice" | "native_screenshare" | "native_voice";
   };
   const authUser = (req as any).user as { userId: string; isAdmin: boolean };
   const userId = authUser.userId;
@@ -43,16 +44,37 @@ router.post("/token", requireAuth, async (req, res) => {
   }
   const moderation = getUserModerationState(db, userId);
 
+  const requestedPurpose = req.body?.purpose;
+  const purpose =
+    requestedPurpose === "native_screenshare" || requestedPurpose === "native_voice"
+      ? requestedPurpose
+      : "voice";
+  const identity =
+    purpose === "native_screenshare"
+      ? `${userId}::screenshare`
+      : purpose === "native_voice"
+        ? `${userId}::nativevoice`
+        : userId;
+  const displayName =
+    purpose === "native_screenshare"
+      ? `${username || "User"} Screen Share`
+      : purpose === "native_voice"
+        ? `${username || "User"} Voice`
+        : username || "User";
+
   const at = new AccessToken(apiKey, apiSecret, {
-    identity: userId,
-    name: username || "User",
+    identity,
+    name: displayName,
   });
 
   at.addGrant({
     roomJoin: true,
     room,
     canPublish: !moderation.isMuted,
-    canSubscribe: !moderation.isDeafened,
+    canSubscribe:
+      purpose === "native_screenshare" || purpose === "native_voice"
+        ? false
+        : !moderation.isDeafened,
   });
 
   const token = await at.toJwt();

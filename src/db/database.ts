@@ -117,7 +117,7 @@ function ensureUserVoicePreferenceColumns(database: Database.Database) {
   }
   if (!names.has("audio_input_sensitivity")) {
     database.exec(
-      "ALTER TABLE users ADD COLUMN audio_input_sensitivity REAL DEFAULT 0.02;"
+      "ALTER TABLE users ADD COLUMN audio_input_sensitivity REAL DEFAULT 0.06;"
     );
   }
   if (!names.has("noise_suppression_mode")) {

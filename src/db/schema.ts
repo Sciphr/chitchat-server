@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
   push_to_talk_enabled INTEGER DEFAULT 0,
   push_to_mute_enabled INTEGER DEFAULT 0,
   push_to_talk_key TEXT DEFAULT 'Space',
-  audio_input_sensitivity REAL DEFAULT 0.02,
+  audio_input_sensitivity REAL DEFAULT 0.06,
   noise_suppression_mode TEXT DEFAULT 'standard' CHECK (noise_suppression_mode IN ('off', 'standard', 'aggressive', 'rnnoise')),
   audio_input_id TEXT,
   video_input_id TEXT,
