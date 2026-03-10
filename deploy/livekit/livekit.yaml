@@ -6,11 +6,8 @@ rtc:
   port_range_end: 50100
   tcp_port: 7881
   use_external_ip: true
-turn:
-  enabled: true
-  domain: livekit.example.com   # <-- CHANGE THIS to your server's domain (must have a valid TLS certificate)
-  tls_port: 5349
-  udp_port: 3478
-  external_tls: false
+# TURN is configured at runtime via the LIVEKIT_TURN_DOMAIN environment variable.
+# If LIVEKIT_TURN_DOMAIN is set, the startup script will inject the TURN block below.
+# Do not add a turn: section here manually.
 logging:
   level: info

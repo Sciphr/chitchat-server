@@ -35,6 +35,10 @@ services:
       LIVEKIT_PORT: ${LIVEKIT_PORT:-7880}
       LIVEKIT_UDP_PORT_START: ${LIVEKIT_UDP_PORT_START:-50000}
       LIVEKIT_UDP_PORT_END: ${LIVEKIT_UDP_PORT_END:-50100}
+      # Set this to your LiveKit domain (e.g. rtc.yourdomain.com) to enable TURN relay.
+      # TURN lets the Rust native client (screen share, native mic) punch through firewalls
+      # when direct UDP is unavailable. Requires ports 3478/UDP and 5349/TCP to be open.
+      LIVEKIT_TURN_DOMAIN: ${LIVEKIT_TURN_DOMAIN:-}
     command:
       - |
         set -eu
@@ -83,6 +87,11 @@ services:
           LK_API_KEY_ESCAPED="$$(printf '%s' "$$LK_API_KEY" | sed 's/[\"\\]/\\&/g')"
           LK_API_SECRET_ESCAPED="$$(printf '%s' "$$LK_API_SECRET" | sed 's/[\"\\]/\\&/g')"
           printf 'keys:\n  "%s": "%s"\n' "$$LK_API_KEY_ESCAPED" "$$LK_API_SECRET_ESCAPED" >> "$$RUNTIME_CFG"
+        fi
+
+        if [ -n "$${LIVEKIT_TURN_DOMAIN:-}" ]; then
+          printf 'turn:\n  enabled: true\n  domain: "%s"\n  tls_port: 5349\n  udp_port: 3478\n  external_tls: false\n' \
+            "$$LIVEKIT_TURN_DOMAIN" >> "$$RUNTIME_CFG"
         fi
 
         exec /livekit-server --config "$$RUNTIME_CFG"
