@@ -90,6 +90,12 @@ services:
       LIVEKIT_API_KEY: "devkey"                          # <-- CHANGE THIS
       LIVEKIT_API_SECRET: "devsecret"                    # <-- CHANGE THIS
 
+      # -- TURN relay (optional but required for Rust native features) -------
+      # Set this to the public domain pointing to this server, e.g. rtc.example.com
+      # Requires ports 3478/UDP and 5349/TCP open in your firewall/reverse proxy.
+      # Leave blank to disable TURN (browser voice still works without it).
+      LIVEKIT_TURN_DOMAIN: ""                            # <-- SET THIS for native screen share
+
       # -- RTC port range (required for voice to work) ----------------------
       # This locks LiveKit to ports 50000-50100 so they match the Docker port
       # mapping above. Without this, LiveKit uses random ports that are
@@ -105,16 +111,6 @@ services:
           use_external_ip: true
         logging:
           level: info
-
-        # -- TURN relay (optional, for users behind strict firewalls/NAT) ---
-        # Requires a domain with a valid TLS certificate pointing to this server.
-        # Uncomment and set your domain to enable:
-        # turn:
-        #   enabled: true
-        #   domain: livekit.example.com
-        #   tls_port: 5349
-        #   udp_port: 3478
-        #   external_tls: false
     command:
       - |
         set -eu
@@ -164,6 +160,11 @@ services:
           LK_API_KEY_ESCAPED="$$(printf '%s' "$$LK_API_KEY" | sed 's/[\"\\]/\\&/g')"
           LK_API_SECRET_ESCAPED="$$(printf '%s' "$$LK_API_SECRET" | sed 's/[\"\\]/\\&/g')"
           printf 'keys:\n  "%s": "%s"\n' "$$LK_API_KEY_ESCAPED" "$$LK_API_SECRET_ESCAPED" >> "$$RUNTIME_CFG"
+        fi
+
+        if [ -n "$${LIVEKIT_TURN_DOMAIN:-}" ]; then
+          printf 'turn:\n  enabled: true\n  domain: "%s"\n  tls_port: 5349\n  udp_port: 3478\n  external_tls: false\n' \
+            "$$LIVEKIT_TURN_DOMAIN" >> "$$RUNTIME_CFG"
         fi
 
         unset LIVEKIT_CONFIG LIVEKIT_KEYS LIVEKIT_KEY_FILE
